@@ -15,7 +15,7 @@ class ScriptRefiner(scripts.ScriptBuiltinUI):
     def title(self):
         return "Refiner"
 
-    def show(self, is_img2img):
+    def show(self, is_img2img): #MJ: Shall I show the ui element on the web ui screen or not
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):

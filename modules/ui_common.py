@@ -129,7 +129,8 @@ Requested path was: {f}
                 sp.Popen(["wsl-open", path])
             else:
                 sp.Popen(["xdg-open", path])
-
+    #End def open_folder(f)
+    
     with gr.Column(variant='panel', elem_id=f"{tabname}_results"):
         with gr.Group(elem_id=f"{tabname}_gallery_container"):
             result_gallery = gr.Gallery(label='Output', show_label=False, elem_id=f"{tabname}_gallery", columns=4, preview=True, height=shared.opts.gallery_height or None)
@@ -137,6 +138,7 @@ Requested path was: {f}
         generation_info = None
         with gr.Column():
             with gr.Row(elem_id=f"image_buttons_{tabname}", elem_classes="image-buttons"):
+                
                 open_folder_button = ToolButton(folder_symbol, elem_id=f'{tabname}_open_folder', visible=not shared.cmd_opts.hide_ui_dir_config, tooltip="Open images output directory.")
 
                 if tabname != "extras":
@@ -155,7 +157,7 @@ Requested path was: {f}
                 outputs=[],
             )
 
-            if tabname != "extras":
+            if tabname != "extras": #MJ: tabname is txt2img or img2img
                 download_files = gr.File(None, file_count="multiple", interactive=False, show_label=False, visible=False, elem_id=f'download_files_{tabname}')
 
                 with gr.Group():

@@ -25,14 +25,14 @@ def find_sampler_config(name):
 
 
 def create_sampler(name, model):
-    config = find_sampler_config(name)
+    config = find_sampler_config(name) #MJ: = 'DPM++ 2M Karras'. This is defined in the UI
 
     assert config is not None, f'bad sampler name: {name}'
 
     if model.is_sdxl and config.options.get("no_sdxl", False):
         raise Exception(f"Sampler {config.name} is not supported for SDXL")
 
-    sampler = config.constructor(model)
+    sampler = config.constructor(model) #MJ: model = LatentDiffusion()
     sampler.config = config
 
     return sampler

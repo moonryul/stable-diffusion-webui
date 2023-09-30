@@ -25,8 +25,8 @@ def setup_img2img_steps(p, steps=None):
         steps = int(requested_steps / min(p.denoising_strength, 0.999)) if p.denoising_strength > 0 else 0
         t_enc = requested_steps - 1
     else:
-        steps = p.steps
-        t_enc = int(min(p.denoising_strength, 0.999) * steps)
+        steps = p.steps #MJ: = a total number of steps for denosing 
+        t_enc = int(min(p.denoising_strength, 0.999) * steps) #MJ: 0.75 * steps (20) = t_enc = 15
 
     return steps, t_enc
 
@@ -83,19 +83,19 @@ def sample_to_image(samples, index=0, approximation=None):
 def samples_to_image_grid(samples, approximation=None):
     return images.image_grid([single_sample_to_image(sample, approximation) for sample in samples])
 
-
+#MJ: Transforms 3-channel image tensors with values in range [-1, 1] to latent 4-channel space images
 def images_tensor_to_samples(image, approximation=None, model=None):
-    '''image[0, 1] -> latent'''
+    '''image[0, 1] -> latent''' 
     if approximation is None:
         approximation = approximation_indexes.get(opts.sd_vae_encode_method, 0)
 
     if approximation == 3:
         image = image.to(devices.device, devices.dtype)
         x_latent = sd_vae_taesd.encoder_model()(image)
-    else:
+    else: #MJ: approximation = 0
         if model is None:
             model = shared.sd_model
-        model.first_stage_model.to(devices.dtype_vae)
+        model.first_stage_model.to(devices.dtype_vae) #MJ: model.first_stage_model = AutoEncoderKL with Encoder and Decoder
 
         image = image.to(shared.device, dtype=devices.dtype_vae)
         image = image * 2 - 1
@@ -106,8 +106,8 @@ def images_tensor_to_samples(image, approximation=None, model=None):
                 )[0]
                 for img in image
             ])
-        else:
-            x_latent = model.get_first_stage_encoding(model.encode_first_stage(image))
+        else: #MJ: model = LatentDiffusion; image: shape = [1,3,4096,4096] => 1/8 encoding => [1,4,512,512]
+            x_latent = model.get_first_stage_encoding(model.encode_first_stage(image)) #MJ: x_latent: (1,4,512,512)
 
     return x_latent
 
@@ -258,7 +258,7 @@ class Sampler:
         state.sampling_step = 0
 
         try:
-            return func()
+            return func() #MJ:  lambda: ddim(self.model_wrap_cfg, xi, extra_args=self.sampler_extra_args, disable=False, callback=self.callback_state, **extra_params_kwargs)
         except RecursionError:
             print(
                 'Encountered RecursionError during sampling, returning last latent. '

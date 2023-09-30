@@ -26,3 +26,12 @@ class CondFunc:
             return self.__sub_func(self.__orig_func, *args, **kwargs)
         else:
             return self.__orig_func(*args, **kwargs)
+
+#MJ: The CondFunc class is designed to provide a "conditional function substitution" mechanism, 
+# allowing you to change the behavior of an existing function based on a certain condition
+
+# The CondFunc class can be instantiated by passing the following parameters:
+
+# orig_func: The original function to be modified.
+# sub_func: The substitution function that should be called when the condition is met.
+# cond_func: A condition function that, when evaluated, determines whether to use the substitution function or the original function.

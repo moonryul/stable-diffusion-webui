@@ -34,8 +34,8 @@ class CFGDenoiser(torch.nn.Module):
     """
     Classifier free guidance denoiser. A wrapper for stable diffusion model (specifically for unet)
     that can take a noisy picture and produce a noise-free picture using two guidances (prompts)
-    instead of one. Originally, the second prompt is just an empty string, but we use non-empty
-    negative prompt.
+    instead of one. Originally, the second prompt is just an empty string (=unconditional generation), but ****we use non-empty
+    negative prompt***.
     """
 
     def __init__(self, sampler):
@@ -112,24 +112,24 @@ class CFGDenoiser(torch.nn.Module):
         repeats = [len(conds_list[i]) for i in range(batch_size)]
 
         if shared.sd_model.model.conditioning_key == "crossattn-adm":
-            image_uncond = torch.zeros_like(image_cond)
+            image_uncond = torch.zeros_like(image_cond) #MJ: this zero image_uncond is used for what?
             make_condition_dict = lambda c_crossattn, c_adm: {"c_crossattn": [c_crossattn], "c_adm": c_adm}
-        else:
-            image_uncond = image_cond
+        else: #MJ: conditioning_key =="hybrid"
+            image_uncond = image_cond  #MJ: shape = torch.Size([1, 5, 512, 512]): This will part of the second sample (for text-unconditional gen) in the batch
             if isinstance(uncond, dict):
                 make_condition_dict = lambda c_crossattn, c_concat: {**c_crossattn, "c_concat": [c_concat]}
             else:
                 make_condition_dict = lambda c_crossattn, c_concat: {"c_crossattn": [c_crossattn], "c_concat": [c_concat]}
 
         if not is_edit_model:
-            x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x])
+            x_in = torch.cat( [ torch.stack( [ x[i] for _ in range(n)] ) for i, n in enumerate(repeats)] + [x] )
             sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma])
             image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_uncond])
-        else:
+        else: #MJ: is_edit_model
             x_in = torch.cat([torch.stack([x[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [x] + [x])
             sigma_in = torch.cat([torch.stack([sigma[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [sigma] + [sigma])
             image_cond_in = torch.cat([torch.stack([image_cond[i] for _ in range(n)]) for i, n in enumerate(repeats)] + [image_uncond] + [torch.zeros_like(self.init_latent)])
-
+        #Mj: image_cond_in.shape = torch.Size([2, 5, 512, 512])
         denoiser_params = CFGDenoiserParams(x_in, image_cond_in, sigma_in, state.sampling_step, state.sampling_steps, tensor, uncond)
         cfg_denoiser_callback(denoiser_params)
         x_in = denoiser_params.x
@@ -165,7 +165,7 @@ class CFGDenoiser(torch.nn.Module):
             else:
                 cond_in = catenate_conds([tensor, uncond])
 
-            if shared.opts.batch_cond_uncond:
+            if shared.opts.batch_cond_uncond: #self.inner_model=CompVisDenoiser(  (inner_model): LatentInpaintDiffusion(  (model): DiffusionWrapper((diffusion_model): UNetModel(
                 x_out = self.inner_model(x_in, sigma_in, cond=make_condition_dict(cond_in, image_cond_in))
             else:
                 x_out = torch.zeros_like(x_in)

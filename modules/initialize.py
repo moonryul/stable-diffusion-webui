@@ -31,7 +31,7 @@ def imports():
     startup_timer.record("import sgm")
 
     from modules import shared_init
-    shared_init.initialize()
+    shared_init.initialize() #MJ: it includes starting the memory monitor thread
     startup_timer.record("initialize shared")
 
     from modules import processing, gradio_extensons, ui  # noqa: F401
@@ -86,7 +86,9 @@ def initialize_rest(*, reload_script_modules=False):
     startup_timer.record("set samplers")
 
     from modules import extensions
+    
     extensions.list_extensions()
+    
     startup_timer.record("list extensions")
 
     from modules import initialize_util
@@ -94,13 +96,18 @@ def initialize_rest(*, reload_script_modules=False):
     startup_timer.record("restore config state file")
 
     from modules import shared, upscaler, scripts
-    if cmd_opts.ui_debug_mode:
-        shared.sd_upscalers = upscaler.UpscalerLanczos().scalers
-        scripts.load_scripts()
+    
+    #MJ: load scripts from the script folder
+    if cmd_opts.ui_debug_mode: #MJ: false
+        
+        shared.sd_upscalers = upscaler.UpscalerLanczos().scalers  #MJ: modules.upscaler
+        scripts.load_scripts() 
         return
 
     from modules import sd_models
-    sd_models.list_models()
+    
+    sd_models.list_models() #MJ: after this command, shared.sd_model = LatentDiffusion is loaded => YES
+    
     startup_timer.record("list SD models")
 
     from modules import localization
@@ -108,7 +115,7 @@ def initialize_rest(*, reload_script_modules=False):
     startup_timer.record("list localizations")
 
     with startup_timer.subcategory("load scripts"):
-        scripts.load_scripts()
+        scripts.load_scripts()  #MJ; scripts are custom scripts other than sd_models
 
     if reload_script_modules:
         for module in [module for name, module in sys.modules.items() if name.startswith("modules.ui")]:
@@ -128,31 +135,46 @@ def initialize_rest(*, reload_script_modules=False):
     startup_timer.record("refresh textual inversion templates")
 
     from modules import script_callbacks, sd_hijack_optimizations, sd_hijack
+    
     script_callbacks.on_list_optimizers(sd_hijack_optimizations.list_optimizers)
+    #MJ: 
+    # """register a function to be called when UI is making a list of cross attention optimization options.
+    # The function will be called with one argument, a list, and shall add objects of type modules.sd_hijack_optimizations.SdOptimization
+    # to it."""
+    
     sd_hijack.list_optimizers()
+    
     startup_timer.record("scripts list_optimizers")
 
     from modules import sd_unet
     sd_unet.list_unets()
     startup_timer.record("scripts list_unets")
 
-    def load_model():
+    def load_model(): #MJ: called by Thread(target=load_model).start() below;   
         """
-        Accesses shared.sd_model property to load model.
+        Accesses **shared.sd_model** property to load model.
         After it's available, if it has been loaded before this access by some extension,
         its optimization may be None because the list of optimizaers has neet been filled
         by that time, so we apply optimization again.
         """
 
-        shared.sd_model  # noqa: B018
+        shared.sd_model  # noqa: B018 
+        #MJ:When a property in Python is accessed (like shared.sd_model), 
+        # it generally behaves like a method without the need to call it using parentheses
+        # . Properties are a way to define special methods that can be accessed like attributes,
+        # allowing for getter, setter, and deleter functionality
 
         if sd_hijack.current_optimizer is None:
             sd_hijack.apply_optimizations()
 
         from modules import devices
         devices.first_time_calculation()
-
+    #def load_model()
+    
     Thread(target=load_model).start()
+    #MJ: It arranges for the object's run() method to be invoked to run load_model()in a separate thread of control.
+    # It hijacks shared.sd_model
+
 
     from modules import shared_items
     shared_items.reload_hypernetworks()

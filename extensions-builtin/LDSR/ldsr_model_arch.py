@@ -118,14 +118,14 @@ class LDSR:
         width_og, height_og = im_og.size
         # If we can adjust the max upscale size, then the 4 below should be our variable
         down_sample_rate = target_scale / 4
-        wd = width_og * down_sample_rate
+        wd = width_og * down_sample_rate  #MJ: 512 = 1024 x 1/2
         hd = height_og * down_sample_rate
         width_downsampled_pre = int(np.ceil(wd))
         height_downsampled_pre = int(np.ceil(hd))
 
         if down_sample_rate != 1:
             print(
-                f'Downsampling from [{width_og}, {height_og}] to [{width_downsampled_pre}, {height_downsampled_pre}]')
+                f'lsdr_model_arch.py: Downsampling from [{width_og}, {height_og}] to [{width_downsampled_pre}, {height_downsampled_pre}]')
             im_og = im_og.resize((width_downsampled_pre, height_downsampled_pre), Image.LANCZOS)
         else:
             print(f"Down sample rate is 1 from {target_scale} / 4 (Not downsampling)")

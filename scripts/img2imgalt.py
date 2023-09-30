@@ -95,6 +95,7 @@ def find_noise_for_image_sigma_adjustment(p, cond, uncond, cfg_scale, steps):
             t = dnw.sigma_to_t(sigma_in)
 
         eps = shared.sd_model.apply_model(x_in * c_in, t, cond=cond_in)
+        
         denoised_uncond, denoised_cond = (x_in + eps * c_out).chunk(2)
 
         denoised = denoised_uncond + (denoised_cond - denoised_uncond) * cfg_scale

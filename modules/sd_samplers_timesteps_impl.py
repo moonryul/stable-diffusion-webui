@@ -8,9 +8,9 @@ from modules.models.diffusion.uni_pc import uni_pc
 
 
 @torch.no_grad()
-def ddim(model, x, timesteps, extra_args=None, callback=None, disable=None, eta=0.0):
+def ddim(model, x, timesteps, extra_args=None, callback=None, disable=None, eta=0.0): #MJ: model = CFGDenoiserTimesteps()
     alphas_cumprod = model.inner_model.inner_model.alphas_cumprod
-    alphas = alphas_cumprod[timesteps]
+    alphas = alphas_cumprod[timesteps] #MJ: timesteps = [1,  51, 101, 151],
     alphas_prev = alphas_cumprod[torch.nn.functional.pad(timesteps[:-1], pad=(1, 0))].to(torch.float64 if x.device.type != 'mps' else torch.float32)
     sqrt_one_minus_alphas = torch.sqrt(1 - alphas)
     sigmas = eta * np.sqrt((1 - alphas_prev.cpu().numpy()) / (1 - alphas.cpu()) * (1 - alphas.cpu() / alphas_prev.cpu().numpy()))
@@ -18,10 +18,12 @@ def ddim(model, x, timesteps, extra_args=None, callback=None, disable=None, eta=
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones((x.shape[0]))
     s_x = x.new_ones((x.shape[0], 1, 1, 1))
+    
+    #MJ: The denosing sampling loop for the inpaint pipeline or img2img pipeline:
     for i in tqdm.trange(len(timesteps) - 1, disable=disable):
         index = len(timesteps) - 1 - i
 
-        e_t = model(x, timesteps[index].item() * s_in, **extra_args)
+        e_t = model(x, timesteps[index].item() * s_in, **extra_args) #MJ: 'cond': <modules.prompt_pars...00493e0e0>, 'image_cond': tensor([[[[ 0.0000e+...h.float16), 'uncond': [[...]], 'cond_scale': 7, 's_min_uncond': 0.0}
 
         a_t = alphas[index].item() * s_x
         a_prev = alphas_prev[index].item() * s_x

@@ -27,7 +27,7 @@ class OnComponent:
     component: gr.blocks.Block
 
 
-class Script:
+class Script: #MJ: scripts.Script will be inherited by the custom scripts defined in the stable-diffusion-webui/scripts folder
     name = None
     """script's internal name derived from title"""
 
@@ -84,25 +84,46 @@ class Script:
 
         pass
 
-    def show(self, is_img2img):
+    def show(self, is_img2img):  #MJ: Whether the script is to be shown in the UI
         """
-        is_img2img is True if this function is called for the img2img interface, and Fasle otherwise
+        is_img2img is True (1) if this function is called for the img2img interface, and (2) Fasle otherwise
 
         This function should return:
-         - False if the script should not be shown in UI at all
-         - True if the script should be shown in UI if it's selected in the scripts dropdown
-         - script.AlwaysVisible if the script should be shown in UI at all times
+         - (1) False if the script should not be shown in UI at all
+         - (2) True if the script should be shown in UI if it's selected in the scripts dropdown
+         - (3) script.AlwaysVisible if the script should be shown in UI at all times
          """
 
         return True
+    
+    
+    #MJ: Script.run() is called by ScriptRunner.run(p, *script_args) which is defined as below in this file:
+    # def run(self, p, *args):
+    #     script_index = args[0] #The first element of args is the script_index
 
+    #     if script_index == 0: #MJ: If there is no script selected, ScriptRunner.run() simply returns None as processed
+    #         return None
+
+    #     script = self.selectable_scripts[script_index-1]
+
+    #     if script is None:
+    #         return None
+
+    #     script_args = args[script.args_from:script.args_to]
+    
+    #     processed = script.run(p, *script_args)
+
+    #     shared.total_tqdm.clear()
+
+    #     return processed
+    
     def run(self, p, *args):
         """
-        This function is called if the script has been selected in the script dropdown.
+        This function is called ***if the script has been selected in the script dropdown***.
         It must do all processing and return the Processed object with results, same as
         one returned by processing.process_images.
 
-        Usually the processing is done by calling the processing.process_images function.
+        Usually the processing is done by calling the **processing.process_images** function.
 
         args contains all values returned by components from ui()
         """
@@ -118,7 +139,7 @@ class Script:
 
     def before_process(self, p, *args):
         """
-        This function is called very early during processing begins for AlwaysVisible scripts.
+        This function is called very early during processing begins for ******AlwaysVisible scripts*****.
         You can modify the processing object (p) here, inject hooks, etc.
         args contains all values returned by components from ui()
         """
@@ -127,8 +148,8 @@ class Script:
 
     def process(self, p, *args):
         """
-        This function is called before processing begins for AlwaysVisible scripts.
-        You can modify the processing object (p) here, inject hooks, etc.
+        This function is called **before processing begins** for *****AlwaysVisible scripts*****.
+        You can %%%%modify the processing object (p)%%%% here, ^^^^inject hooks^^^^^, etc.
         args contains all values returned by components from ui()
         """
 
@@ -215,7 +236,7 @@ class Script:
 
     def postprocess(self, p, processed, *args):
         """
-        This function is called after processing ends for AlwaysVisible scripts.
+        This function is called **after processing ends** for ****AlwaysVisible scripts****.
         args contains all values returned by components from ui()
         """
 
@@ -311,18 +332,24 @@ scripts_data = []
 postprocessing_scripts_data = []
 ScriptClassData = namedtuple("ScriptClassData", ["script_class", "path", "basedir", "module"])
 
-
+#MJ: called by scripts_list = list_scripts("scripts", ".py") + list_scripts("modules/processing_scripts", ".py", include_extensions=False)
+# list_scripts("scripts", ".py") is main, and lists up extensions script as well.
 def list_scripts(scriptdirname, extension, *, include_extensions=True):
+    
     scripts_list = []
 
     basedir = os.path.join(paths.script_path, scriptdirname)
+    
     if os.path.exists(basedir):
         for filename in sorted(os.listdir(basedir)):
+            
             scripts_list.append(ScriptFile(paths.script_path, filename, os.path.join(basedir, filename)))
 
-    if include_extensions:
-        for ext in extensions.active():
+    if include_extensions: 
+        for ext in extensions.active(): #MJ: extensions.active() is the list of extensions.
             scripts_list += ext.list_files(scriptdirname, extension)
+            #MJ: => def list_files(self, subdir, extension): MJ: extension folder has "scripts" subfolder under it.
+            #The ordinary scripts also are located under the folder named "scripts"
 
     scripts_list = [x for x in scripts_list if os.path.splitext(x.path)[1].lower() == extension and os.path.isfile(x.path)]
 
@@ -372,7 +399,8 @@ def load_scripts():
             if basedir.startswith(key):
                 return priority[key]
         return 9999
-
+    #def orderby(basedir)
+    
     for scriptfile in sorted(scripts_list, key=lambda x: [orderby(x.basedir), x]):
         try:
             if scriptfile.basedir != paths.script_path:
@@ -380,7 +408,18 @@ def load_scripts():
             current_basedir = scriptfile.basedir
 
             script_module = script_loading.load_module(scriptfile.path)
+            
             register_scripts_from_module(script_module)
+        # MJ:    def register_scripts_from_module(module):
+        # for script_class in module.__dict__.values():
+        #     if not inspect.isclass(script_class):
+        #         continue
+
+        #     if issubclass(script_class, Script):
+        #         scripts_data.append(ScriptClassData(script_class, scriptfile.path, scriptfile.basedir, module))
+        #     elif issubclass(script_class, scripts_postprocessing.ScriptPostprocessing):
+        #         postprocessing_scripts_data.append(ScriptClassData(script_class, scriptfile.path, scriptfile.basedir, module))
+
 
         except Exception:
             errors.report(f"Error loading script: {scriptfile.filename}", exc_info=True)
@@ -392,10 +431,26 @@ def load_scripts():
 
     global scripts_txt2img, scripts_img2img, scripts_postproc
 
+    #MJ: These variables are GLOBAL:
+    
+#     If those variables have already been defined in the global scope, then this statement allows the code
+#     in the current function to refer to those global variables, instead of creating new local variables
+#     with the same names.
+
+# If those variables have not yet been defined in the global scope, this statement doesn't automatically
+# create them or assign any values to them. It just indicates that they should be treated as global variables 
+# whenever they are used in the current function.
+# If you attempt to use these variables in the function without having defined them in the global scope, 
+# you will get a NameError indicating that the variables are not defined.
+
+# So, it is generally assumed that these variables have been or will be defined in the global scope 
+# at some point when using the global keyword like this. It’s a good practice to actually define and 
+# initialize your global variables in the global scope before you use them in any function to avoid NameErrors.
+
     scripts_txt2img = ScriptRunner()
     scripts_img2img = ScriptRunner()
     scripts_postproc = scripts_postprocessing.ScriptPostprocessingRunner()
-
+#def load_scripts()
 
 def wrap_call(func, filename, funcname, *args, default=None, **kwargs):
     try:
@@ -409,8 +464,11 @@ def wrap_call(func, filename, funcname, *args, default=None, **kwargs):
 class ScriptRunner:
     def __init__(self):
         self.scripts = []
-        self.selectable_scripts = []
-        self.alwayson_scripts = []
+        
+        self.selectable_scripts = [] #MJ: scripts to be selected by the user
+        
+        self.alwayson_scripts = []  #MJ: scripts to be on all the time
+        
         self.titles = []
         self.title_map = {}
         self.infotext_fields = []
@@ -432,7 +490,7 @@ class ScriptRunner:
 
         auto_processing_scripts = scripts_auto_postprocessing.create_auto_preprocessing_script_data()
 
-        for script_data in auto_processing_scripts + scripts_data:
+        for script_data in auto_processing_scripts + scripts_data:  #MJ: scripts_data was created above
             script = script_data.script_class()
             script.filename = script_data.path
             script.is_txt2img = not is_img2img
@@ -443,12 +501,12 @@ class ScriptRunner:
 
             if visibility == AlwaysVisible:
                 self.scripts.append(script)
-                self.alwayson_scripts.append(script)
+                self.alwayson_scripts.append(script)  #MJ: add script to the alwayson_scripts
                 script.alwayson = True
 
             elif visibility:
                 self.scripts.append(script)
-                self.selectable_scripts.append(script)
+                self.selectable_scripts.append(script)  #MJ: add script to the selectable_scripts
 
         self.apply_on_before_component_callbacks()
 
@@ -579,31 +637,36 @@ class ScriptRunner:
             else:
                 return gr.update(visible=False)
 
+        #MJ------------------------------
         self.infotext_fields.append((dropdown, lambda x: gr.update(value=x.get('Script', 'None'))))
         self.infotext_fields.extend([(script.group, onload_script_visibility) for script in self.selectable_scripts])
 
         self.apply_on_before_component_callbacks()
 
         return self.inputs
-
+    #def setup_ui(self)
+    
+    #MJ: ScriptRunner.run: invoked by 
+    #  proc = modules.scripts.scripts_img2img.run(p, *args) in modules.img2img
     def run(self, p, *args):
-        script_index = args[0]
+        script_index = args[0] #MJ: args = (9, False, '', 0.8, -1, False, -1, 0, 0, 0, False, 'MultiDiffusion', False, True, ...)= 9
 
-        if script_index == 0:
+        if script_index == 0: #MJ:  script_index is set when I enable custom Script "sd_upscale.py", "seamless tile inpainting" etc
             return None
 
-        script = self.selectable_scripts[script_index-1]
+        script = self.selectable_scripts[script_index-1]  #MJ: script = seamless_tile_inpainting, sd upscale, etc
 
-        if script is None:
+        if script is None: #When No custom script is enabled, ScriptRunner.run() simply returns None as processed
             return None
 
         script_args = args[script.args_from:script.args_to]
-        processed = script.run(p, *script_args)
+        
+        processed = script.run(p, *script_args)  #MJ:  seamless_tile_inpainting, etc
 
         shared.total_tqdm.clear()
 
         return processed
-
+    #MJ: ScriptRunnner's methods for alwaysOn Scripts, which includes Refiner, Seed, Tiled Diffusion, Tiled VAE
     def before_process(self, p):
         for script in self.alwayson_scripts:
             try:
@@ -613,10 +676,13 @@ class ScriptRunner:
                 errors.report(f"Error running before_process: {script.filename}", exc_info=True)
 
     def process(self, p):
-        for script in self.alwayson_scripts:
+        for script in self.alwayson_scripts: #MJ:self.alwayson_scripts=[refiner, seed, tiled diffusion, tiled vae, extra-options]
             try:
                 script_args = p.script_args[script.args_from:script.args_to]
-                script.process(p, *script_args)
+                script.process(p, *script_args) 
+                #MJ: =>  #MJ: Set a new encoder to encoder.forward and a new decoder to decoder.forward; 
+                # THe new encoder is executed by init() method of p, StableDiffusionProcessingImg2Img class; 
+                # The new  decoder will be executed when decoding the result of sampler, the sampler for ddpm model is executed
             except Exception:
                 errors.report(f"Error running process: {script.filename}", exc_info=True)
 
@@ -742,6 +808,9 @@ class ScriptRunner:
             except Exception:
                 errors.report(f"Error running setup: {script.filename}", exc_info=True)
 
+#class ScriptRunner
+
+#MJ: Define the fields of "ScriptRunner" in scripts module:
 
 scripts_txt2img: ScriptRunner = None
 scripts_img2img: ScriptRunner = None

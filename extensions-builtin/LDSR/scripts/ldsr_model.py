@@ -54,7 +54,7 @@ class UpscalerLDSR(Upscaler):
         except Exception:
             errors.report(f"Failed loading LDSR model {path}", exc_info=True)
             return img
-        ddim_steps = shared.opts.ldsr_steps
+        ddim_steps = shared.opts.ldsr_steps #MJ = 100
         return ldsr.super_resolution(img, ddim_steps, self.scale)
 
 

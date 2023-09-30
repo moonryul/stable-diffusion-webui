@@ -15,13 +15,13 @@ from modules.paths_internal import script_path, extensions_dir
 from modules.timer import startup_timer
 from modules import logging_config
 
-args, _ = cmd_args.parser.parse_known_args()
+args, _ = cmd_args.parser.parse_known_args() #MJ: parse known args
 logging_config.setup_logging(args.loglevel)
 
 python = sys.executable
 git = os.environ.get('GIT', "git")
 index_url = os.environ.get('INDEX_URL', "")
-dir_repos = "repositories"
+dir_repos = "repositories"  #MJ: the cloned repository => stability ai github
 
 # Whether to default to printing command output
 default_command_live = (os.environ.get('WEBUI_LAUNCH_LIVE_OUTPUT') == "1")
@@ -50,7 +50,9 @@ INCOMPATIBLE PYTHON VERSION
 This program is tested with 3.10.6 Python, but you have {major}.{minor}.{micro}.
 If you encounter an error with "RuntimeError: Couldn't install torch." message,
 or any other error regarding unsuccessful package (library) installation,
+
 please downgrade (or upgrade) to the latest version of 3.10 Python
+
 and delete current Python and "venv" folder in WebUI's directory.
 
 You can download 3.10 Python from here: https://www.python.org/downloads/release/python-3106/
@@ -220,6 +222,7 @@ def version_check(commit):
 
 
 def run_extension_installer(extension_dir):
+    
     path_installer = os.path.join(extension_dir, "install.py")
     if not os.path.isfile(path_installer):
         return
@@ -429,7 +432,7 @@ def configure_for_tests():
 
 def start():
     print(f"Launching {'API server' if '--nowebui' in sys.argv else 'Web UI'} with arguments: {' '.join(sys.argv[1:])}")
-    import webui
+    import webui  #MJ => initialize.imports() #MJ: import modules and initialization of variables, and starting of memory thread; Modules execute statements
     if '--nowebui' in sys.argv:
         webui.api_only()
     else:

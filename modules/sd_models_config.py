@@ -4,13 +4,13 @@ import torch
 
 from modules import shared, paths, sd_disable_initialization, devices
 
-sd_configs_path = shared.sd_configs_path
-sd_repo_configs_path = os.path.join(paths.paths['Stable Diffusion'], "configs", "stable-diffusion")
-sd_xl_repo_configs_path = os.path.join(paths.paths['Stable Diffusion XL'], "configs", "inference")
+sd_configs_path = shared.sd_configs_path #MJ: = '/home/moon/stable-diffusion-webui/configs
+sd_repo_configs_path = os.path.join(paths.paths['Stable Diffusion'], "configs", "stable-diffusion") #MJ: '/home/moon/stable-diffusion-webui/repositories/stable-diffusion-stability-ai/configs/stable-diffusion'
+sd_xl_repo_configs_path = os.path.join(paths.paths['Stable Diffusion XL'], "configs", "inference") #MJ: = '/home/moon/stable-diffusion-webui/repositories/stable-diffusion-stability-ai/configs/stable-diffusion'
 
 
-config_default = shared.sd_default_config
-config_sd2 = os.path.join(sd_repo_configs_path, "v2-inference.yaml")
+config_default = shared.sd_default_config  #MJ: =configs/v1-inpainting-inference.yaml
+config_sd2 = os.path.join(sd_repo_configs_path, "v2-inference.yaml") #MJ: '/home/moon/stable-diffusion-webui/repositories/stable-diffusion-stability-ai/configs/stable-diffusion/v2-inference.yaml'
 config_sd2v = os.path.join(sd_repo_configs_path, "v2-inference-v.yaml")
 config_sd2_inpainting = os.path.join(sd_repo_configs_path, "v2-inpainting-inference.yaml")
 config_sdxl = os.path.join(sd_xl_repo_configs_path, "sd_xl_base.yaml")
@@ -66,9 +66,9 @@ def is_using_v_parameterization_for_sd2(state_dict):
 
 
 def guess_model_config_from_state_dict(sd, filename):
-    sd2_cond_proj_weight = sd.get('cond_stage_model.model.transformer.resblocks.0.attn.in_proj_weight', None)
+    sd2_cond_proj_weight = sd.get('cond_stage_model.model.transformer.resblocks.0.attn.in_proj_weight', None) #MJ: None
     diffusion_model_input = sd.get('model.diffusion_model.input_blocks.0.0.weight', None)
-    sd2_variations_weight = sd.get('embedder.model.ln_final.weight', None)
+    sd2_variations_weight = sd.get('embedder.model.ln_final.weight', None)  #MJ: None
 
     if sd.get('conditioner.embedders.1.model.ln_final.weight', None) is not None:
         return config_sdxl
@@ -90,7 +90,7 @@ def guess_model_config_from_state_dict(sd, filename):
             return config_sd2
 
     if diffusion_model_input is not None:
-        if diffusion_model_input.shape[1] == 9:
+        if diffusion_model_input.shape[1] == 9: #MJ: diffusion_model_input.shape =torch.Size([320, 4, 3, 3])
             return config_inpainting
         if diffusion_model_input.shape[1] == 8:
             return config_instruct_pix2pix
@@ -98,7 +98,7 @@ def guess_model_config_from_state_dict(sd, filename):
     if sd.get('cond_stage_model.roberta.embeddings.word_embeddings.weight', None) is not None:
         return config_alt_diffusion
 
-    return config_default
+    return config_default #MJ: configs/v1-inpainting-inference.yaml
 
 
 def find_checkpoint_config(state_dict, info):

@@ -83,3 +83,17 @@ CondFunc('ldm.models.diffusion.ddpm.LatentDiffusion.get_first_stage_encoding', l
 
 CondFunc('sgm.modules.diffusionmodules.wrappers.OpenAIWrapper.forward', apply_model, unet_needs_upcast)
 CondFunc('sgm.modules.diffusionmodules.openaimodel.timestep_embedding', lambda orig_func, timesteps, *args, **kwargs: orig_func(timesteps, *args, **kwargs).to(torch.float32 if timesteps.dtype == torch.int64 else devices.dtype_unet), unet_needs_upcast)
+
+#MJ:
+# Given this definition, the following line:
+
+# python
+# Copy code
+# CondFunc('ldm.models.diffusion.ddpm.LatentDiffusion.apply_model', apply_model, unet_needs_upcast)
+# performs the following actions:
+
+# ldm.models.diffusion.ddpm.LatentDiffusion.apply_model is resolved to the actual apply_model function 
+# in the LatentDiffusion class of the ldm.models.diffusion.ddpm module.
+# The behavior of this resolved apply_model function is hijacked such that:
+# If the unet_needs_upcast function returns True when called, the new version of the apply_model function will be executed.
+# Otherwise, the original behavior of the apply_model function will be retained.

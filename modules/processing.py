@@ -89,7 +89,8 @@ def create_binary_mask(image):
     return image
 
 def txt2img_image_conditioning(sd_model, x, width, height):
-    if sd_model.model.conditioning_key in {'hybrid', 'concat'}: # Inpainting models
+    
+    if sd_model.model.conditioning_key in {'hybrid', 'concat'}: # Inpainting models: hybrid: use text prompt; concat:  use a pure inpainting
 
         # The "masked-image" in this case will just be all 0.5 since the entire image is masked.
         image_conditioning = torch.ones(x.shape[0], 3, height, width, device=x.device) * 0.5
@@ -111,10 +112,19 @@ def txt2img_image_conditioning(sd_model, x, width, height):
         # Pretty sure we can just make this a 1x1 image since its not going to be used besides its batch size.
         return x.new_zeros(x.shape[0], 5, 1, 1, dtype=x.dtype, device=x.device)
 
-
+#MJ:
+# This Python class uses the dataclasses module, which automatically generates special methods 
+# such as __init__(), __repr__(), and __eq__() for the class, based on the class attributes
+# defined with type annotations.
+# When you decorate a class with @dataclass, it inspects the class to find Fields 
+# (defined using type hints) and generates the __init__() method (among others) automatically, using the attributes you've defined in the class body.
+# Here, the __post_init__() method is defined to do some additional initialization 
+# immediately after the __init__() method has run. This allows you to customize the initialization process further,
+# beyond what the automatically generated __init__() method does.
 @dataclass(repr=False)
 class StableDiffusionProcessing:
     sd_model: object = None
+    
     outpath_samples: str = None
     outpath_grids: str = None
     prompt: str = ""
@@ -130,6 +140,11 @@ class StableDiffusionProcessing:
     sampler_name: str = None
     batch_size: int = 1
     n_iter: int = 1
+    #MJ: Each "iteration" thus corresponds to a full run of the process,
+    # starting with an initial image and going through the whole series of steps to generate an output. 
+    # This allows for multiple outputs to be generated with potentially different results 
+    # in each iteration due to the stochastic nature of the diffusion process.
+    
     steps: int = 50
     cfg_scale: float = 7.0
     width: int = 512
@@ -272,9 +287,11 @@ class StableDiffusionProcessing:
         self.comments[text] = 1
 
     def txt2img_image_conditioning(self, x, width=None, height=None):
+        
         self.is_using_inpainting_conditioning = self.sd_model.model.conditioning_key in {'hybrid', 'concat'}
 
         return txt2img_image_conditioning(self.sd_model, x, width or self.width, height or self.height)
+    #MJ: => def txt2img_image_conditioning(sd_model, x, width, height)
 
     def depth2img_image_conditioning(self, source_image):
         # Use the AddMiDaS helper to Format our source image to suit the MiDaS model
@@ -301,7 +318,9 @@ class StableDiffusionProcessing:
         return conditioning_image
 
     def unclip_image_conditioning(self, source_image):
+        
         c_adm = self.sd_model.embedder(source_image)
+        
         if self.sd_model.noise_augmentor is not None:
             noise_level = 0 # TODO: Allow other noise levels?
             c_adm, noise_level_emb = self.sd_model.noise_augmentor(c_adm, noise_level=repeat(torch.tensor([noise_level]).to(c_adm.device), '1 -> b', b=c_adm.shape[0]))
@@ -328,19 +347,23 @@ class StableDiffusionProcessing:
         # Create another latent image, this time with a masked version of the original input.
         # Smoothly interpolate between the masked and unmasked latent conditioning image using a parameter.
         conditioning_mask = conditioning_mask.to(device=source_image.device, dtype=source_image.dtype)
+        
         conditioning_image = torch.lerp(
             source_image,
-            source_image * (1.0 - conditioning_mask),
+            source_image * (1.0 - conditioning_mask), #MJ: = the masked_image
             getattr(self, "inpainting_mask_weight", shared.opts.inpainting_mask_weight)
         )
 
-        # Encode the new masked image using first stage of network.
+        # Encode the new masked image using the first stage of network.
+        #MJ: You might use the clip image encoder to encode the input image
         conditioning_image = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(conditioning_image))
 
         # Create the concatenated conditioning tensor to be fed to `c_concat`
         conditioning_mask = torch.nn.functional.interpolate(conditioning_mask, size=latent_image.shape[-2:])
         conditioning_mask = conditioning_mask.expand(conditioning_image.shape[0], -1, -1, -1)
+        
         image_conditioning = torch.cat([conditioning_mask, conditioning_image], dim=1)
+        
         image_conditioning = image_conditioning.to(shared.device).type(self.sd_model.dtype)
 
         return image_conditioning
@@ -356,14 +379,15 @@ class StableDiffusionProcessing:
         if self.sd_model.cond_stage_key == "edit":
             return self.edit_image_conditioning(source_image)
 
-        if self.sampler.conditioning_key in {'hybrid', 'concat'}:
-            return self.inpainting_image_conditioning(source_image, latent_image, image_mask=image_mask)
+        if self.sampler.conditioning_key in {'hybrid', 'concat'}: #MJ: conditioning_key='hybrid' in inpainting: needs mask and masked_image conditions
+            return self.inpainting_image_conditioning(source_image, latent_image, image_mask=image_mask) #MJ: return  image_conditioning = torch.cat([conditioning_mask, conditioning_image], dim=1)
+        #MJ:  seamless tile inpainting does not use inpainting pipeline? Is this pipeline used only when I explicitly choose "inpainting" button?
 
         if self.sampler.conditioning_key == "crossattn-adm":
             return self.unclip_image_conditioning(source_image)
-
-        # Dummy zero conditioning if we're not using inpainting or depth model.
-        return latent_image.new_zeros(latent_image.shape[0], 5, 1, 1)
+        #MJ: self.sampler.conditioning_key = "crossattn" when you use seamless tile inpainting or sd upscaler custom script=> means the source image is used as the guide image for the img2img pipeline
+        # Dummy zero conditioning if we're not using inpainting or depth model.latent_image.shape=[1, 4, 512, 512]
+        return latent_image.new_zeros(latent_image.shape[0], 5, 1, 1) #MJ:5= channels; This tensor has the same batch size as latent_image and dimensions of 5x1x1 for the other three dimensions. The purpose, based on the comment, is to act as a "dummy" tensor, possibly for conditioning, in cases where certain features or operations (like inpainting or a depth model) are not being used in the overall model or process.
 
     def init(self, all_prompts, all_seeds, all_subseeds):
         pass
@@ -479,6 +503,16 @@ class StableDiffusionProcessing:
         """Returns whether generated images need to be written to disk"""
         return opts.samples_save and not self.do_not_save_samples and (opts.save_incomplete_images or not state.interrupted and not state.skipped)
 
+#MJ: called by
+# res = Processed(
+#         p,
+#         images_list=output_images,
+#         seed=p.all_seeds[0],
+#         info=infotexts[0],
+#         subseed=p.all_subseeds[0],
+#         index_of_first_image=index_of_first_image,
+#         infotexts=infotexts,
+#     )
 
 class Processed:
     def __init__(self, p: StableDiffusionProcessing, images_list, seed=-1, info="", subseed=None, all_prompts=None, all_negative_prompts=None, all_seeds=None, all_subseeds=None, index_of_first_image=0, infotexts=None, comments=""):
@@ -577,6 +611,7 @@ class Processed:
     def get_token_merging_ratio(self, for_hr=False):
         return self.token_merging_ratio_hr if for_hr else self.token_merging_ratio
 
+#class Processed
 
 def create_random_tensors(shape, seeds, subseeds=None, subseed_strength=0.0, seed_resize_from_h=0, seed_resize_from_w=0, p=None):
     g = rng.ImageRNG(shape, seeds, subseeds=subseeds, subseed_strength=subseed_strength, seed_resize_from_h=seed_resize_from_h, seed_resize_from_w=seed_resize_from_w)
@@ -631,9 +666,9 @@ def get_fixed_seed(seed):
             seed = -1
 
     if seed == -1:
-        return int(random.randrange(4294967294))
+        return int(random.randrange(4294967294)) #MJ: a random integer between 0 and 4294967293 (inclusive).
 
-    return seed
+    return seed #MJ seed may be an integer from str: that same seed will be returned each time
 
 
 def fix_seed(p):
@@ -704,21 +739,35 @@ def create_infotext(p, all_prompts, all_seeds, all_subseeds, comments=None, iter
 
     return f"{prompt_text}{negative_prompt_text}\n{generation_params_text}".strip()
 
-
+#MJ: processing.process_images: called by custom script
 def process_images(p: StableDiffusionProcessing) -> Processed:
-    if p.scripts is not None:
+    if p.scripts is not None: #MJ: p.scripts = modules.scripts.scripts_txt2img is a ScriptRunner
         p.scripts.before_process(p)
 
-    stored_opts = {k: opts.data[k] for k in p.override_settings.keys()}
+    stored_opts = {k: opts.data[k] for k in p.override_settings.keys()} #MJ: = { }
 
     try:
-        # if no checkpoint override or the override checkpoint can't be found, remove override entry and load opts checkpoint
-        # and if after running refiner, the refiner model is not unloaded - webui swaps back to main model here, if model over is present it will be reloaded afterwards
-        if sd_models.checkpoint_aliases.get(p.override_settings.get('sd_model_checkpoint')) is None:
-            p.override_settings.pop('sd_model_checkpoint', None)
+        # (1) if no checkpoint override or the override checkpoint can't be found, remove override entry and load opts checkpoint:
+        #=> MJ: Override: Here, "override" likely means that the function allows for the option to provide a specific checkpoint file 
+        # to be used, superseding the default or previously defined checkpoint file. The comment states that 
+        # if there's no override specified or if the checkpoint file specified for overriding cannot be found, 
+        # it removes the override entry and proceeds to load the checkpoint specified in opts 
+        # (perhaps a configuration object holding various settings).
+        
+        
+        # (2) and if after running refiner, the refiner model is not unloaded - webui swaps back to main model here, if model over is present it will be reloaded afterwards
+        
+        #MJ:  the script is built to handle both situations: when overrides are present and when they are not, ensuring stability in its operations under different circumstances.
+        
+        if sd_models.checkpoint_aliases.get( p.override_settings.get('sd_model_checkpoint') ) is None:
+            
+            p.override_settings.pop('sd_model_checkpoint', None) #MJ: None arg means that the key "sd_model_checkpoint" in override_setting does not exist, 
+                                                                  #it does not raise exception. 
             sd_models.reload_model_weights()
+            #MJ: This is part of ensuring that the system returns to a defined state even after user overrides,
+            # maintaining system stability and predictability of outcomes.
 
-        for k, v in p.override_settings.items():
+        for k, v in p.override_settings.items(): #MJ: = dict_items([])
             opts.set(k, v, is_api=True, run_callbacks=False)
 
             if k == 'sd_model_checkpoint':
@@ -727,16 +776,28 @@ def process_images(p: StableDiffusionProcessing) -> Processed:
             if k == 'sd_vae':
                 sd_vae.reload_vae_weights()
 
-        sd_models.apply_token_merging(p.sd_model, p.get_token_merging_ratio())
+        sd_models.apply_token_merging(p.sd_model, p.get_token_merging_ratio()) #MJ: p.get_token_merging_ratio()= 0.0
+        #MJ: Token merging is a technique where you combine multiple adjacent tokens into a single token to create a new representation with a reduced number of tokens. 
+        # The "token merging ratio" would specify the degree to which this merging is performed
+        #MJ: specifying the proportion of token merging that should be applied to the model during this processing session.
+        
+    #MJ:    @property
+    # def sd_model(self):
+    #    return shared.sd_model
 
         res = process_images_inner(p)
-
+    #end try
+    
     finally:
         sd_models.apply_token_merging(p.sd_model, 0)
+        #MJ: This line is resetting any token merging that had been applied to the model during the processing to a state of no merging (i.e., a merging ratio of 0).
 
         # restore opts to original state
+        #MJ: Here, if the p.override_settings_restore_afterwards flag is true, the script iterates over all key-value pairs in stored_opts (which stored the original settings before any overrides were applied)
+        # and restores each setting to its original value.
         if p.override_settings_restore_afterwards:
             for k, v in stored_opts.items():
+                
                 setattr(opts, k, v)
 
                 if k == 'sd_vae':
@@ -744,45 +805,48 @@ def process_images(p: StableDiffusionProcessing) -> Processed:
 
     return res
 
-
+#MJ: THE MAIN LOOP OF IMAGE GEN: txt2img or img2img pipeline with some condition mechanism depending on the options
 def process_images_inner(p: StableDiffusionProcessing) -> Processed:
     """this is the main loop that both txt2img and img2img use; it calls func_init once inside all the scopes and func_sample once per batch"""
 
     if isinstance(p.prompt, list):
-        assert(len(p.prompt) > 0)
+        assert(len(p.prompt) > 0) 
     else:
-        assert p.prompt is not None
+        assert p.prompt is not None #MJ: p.prompt = None not allowed
 
     devices.torch_gc()
 
     seed = get_fixed_seed(p.seed)
+    #MJ: The function returns a fixed seed only if a valid seed (a non-negative integer or a string that can be converted to a non-negative integer) is provided as an argument
     subseed = get_fixed_seed(p.subseed)
 
     if p.restore_faces is None:
         p.restore_faces = opts.face_restoration
 
     if p.tiling is None:
-        p.tiling = opts.tiling
+        p.tiling = opts.tiling #MJ: false
 
-    if p.refiner_checkpoint not in (None, "", "None", "none"):
+    if p.refiner_checkpoint not in (None, "", "None", "none"): #MJ: p.refiner_checkpoint = None
         p.refiner_checkpoint_info = sd_models.get_closet_checkpoint_match(p.refiner_checkpoint)
         if p.refiner_checkpoint_info is None:
             raise Exception(f'Could not find checkpoint with name {p.refiner_checkpoint}')
 
+    #MJ: shared.sd_model refers to LatentDiffusion() defined in Stable Diffusion github
     p.sd_model_name = shared.sd_model.sd_checkpoint_info.name_for_extra
     p.sd_model_hash = shared.sd_model.sd_model_hash
+    
     p.sd_vae_name = sd_vae.get_loaded_vae_name()
     p.sd_vae_hash = sd_vae.get_loaded_vae_hash()
 
     modules.sd_hijack.model_hijack.apply_circular(p.tiling)
     modules.sd_hijack.model_hijack.clear_comments()
 
-    p.setup_prompts()
+    p.setup_prompts() #MJ: p.main_prompt, p.negative_prompt, p.all_prompts etc
 
     if isinstance(seed, list):
         p.all_seeds = seed
     else:
-        p.all_seeds = [int(seed) + (x if p.subseed_strength == 0 else 0) for x in range(len(p.all_prompts))]
+        p.all_seeds = [int(seed) + (x if p.subseed_strength == 0 else 0) for x in range(len(p.all_prompts))] #MJ: p.all_prompts=''
 
     if isinstance(subseed, list):
         p.all_subseeds = subseed
@@ -792,26 +856,29 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
     if os.path.exists(cmd_opts.embeddings_dir) and not p.do_not_reload_embeddings:
         model_hijack.embedding_db.load_textual_inversion_embeddings()
 
-    if p.scripts is not None:
-        p.scripts.process(p)
+    if p.scripts is not None: #MJ:     p.scripts = modules.scripts.scripts_img2img
+        p.scripts.process(p) #MJ: call script.process(p,*script_args) for each scrit in ***self.alwayson_scripts***
 
     infotexts = []
     output_images = []
 
     with torch.no_grad(), p.sd_model.ema_scope():
         with devices.autocast():
-            p.init(p.all_prompts, p.all_seeds, p.all_subseeds)
+            
+            p.init(p.all_prompts, p.all_seeds, p.all_subseeds) #MJ: creates the concatenated condition for the unet, including the dummy condtion
+            #MJ: note that  
+            ##  p.init_images = work[i * batch_size: (i + 1) * batch_size] #MJ:the 0th batch= 0: batch_size; the 1th batch =batch_size: 2*batch_size'...
 
             # for OSX, loading the model during sampling changes the generated picture, so it is loaded here
             if shared.opts.live_previews_enable and opts.show_progress_type == "Approx NN":
                 sd_vae_approx.model()
 
-            sd_unet.apply_unet()
+            sd_unet.apply_unet() #MJ: no effect
 
         if state.job_count == -1:
             state.job_count = p.n_iter
 
-        for n in range(p.n_iter):
+        for n in range(p.n_iter): #MJ: Within process_images_inner(p: StableDiffusionProcessing) 
             p.iteration = n
 
             if state.skipped:
@@ -825,7 +892,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
             p.prompts = p.all_prompts[n * p.batch_size:(n + 1) * p.batch_size]
             p.negative_prompts = p.all_negative_prompts[n * p.batch_size:(n + 1) * p.batch_size]
             p.seeds = p.all_seeds[n * p.batch_size:(n + 1) * p.batch_size]
-            p.subseeds = p.all_subseeds[n * p.batch_size:(n + 1) * p.batch_size]
+            p.subseeds = p.all_subseeds[n * p.batch_size:(n + 1) * p.batch_size] #MJ: p.height = 1024, opt_f =8
 
             p.rng = rng.ImageRNG((opt_C, p.height // opt_f, p.width // opt_f), p.seeds, subseeds=p.subseeds, subseed_strength=p.subseed_strength, seed_resize_from_h=p.seed_resize_from_h, seed_resize_from_w=p.seed_resize_from_w)
 
@@ -841,7 +908,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                 with devices.autocast():
                     extra_networks.activate(p, p.extra_network_data)
 
-            if p.scripts is not None:
+            if p.scripts is not None:  #MJ:     p.scripts = modules.scripts.scripts_img2img
                 p.scripts.process_batch(p, batch_number=n, prompts=p.prompts, seeds=p.seeds, subseeds=p.subseeds)
 
             # params.txt should be saved after scripts.process_batch, since the
@@ -853,7 +920,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                     processed = Processed(p, [])
                     file.write(processed.infotext(p, 0))
 
-            p.setup_conds()
+            p.setup_conds() #MJ: set p.c and p.uc
 
             for comment in model_hijack.comments:
                 p.comment(comment)
@@ -864,16 +931,21 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                 shared.state.job = f"Batch {n+1} out of {p.n_iter}"
 
             with devices.without_autocast() if devices.unet_needs_upcast else devices.autocast():
+                #MJ: notice the fimilar samples_ddim: this is the main entry point to the SD backbone
+                #p.image_conditioning (consisting of the mask and the masked_image), is used in p.sample()
+                #MJ:samples_ddim is obtained by sampling image from the inpaint model or img2img model for each tile from the "upscaled image" by ESRGAN
                 samples_ddim = p.sample(conditioning=p.c, unconditional_conditioning=p.uc, seeds=p.seeds, subseeds=p.subseeds, subseed_strength=p.subseed_strength, prompts=p.prompts)
+                #MJ: samples_ddim.shape = (1,4,128,128) = (1,4, 1024,1024)/8 => StableDiffusionProcessingTxt2Img.sample()
+            
 
             if getattr(samples_ddim, 'already_decoded', False):
                 x_samples_ddim = samples_ddim
-            else:
+            else: #MJ: not 'already_decoded'
                 if opts.sd_vae_decode_method != 'Full':
                     p.extra_generation_params['VAE Decoder'] = opts.sd_vae_decode_method
-
+    
                 x_samples_ddim = decode_latent_batch(p.sd_model, samples_ddim, target_device=devices.cpu, check_for_nans=True)
-
+             #MJ: x_samples_ddim[0].shape = (1,3,1024,1024); samples_ddim=(1,4,128,128)
             x_samples_ddim = torch.stack(x_samples_ddim).float()
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
 
@@ -884,7 +956,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
 
             devices.torch_gc()
 
-            if p.scripts is not None:
+            if p.scripts is not None:  #MJ:     p.scripts = modules.scripts.scripts_img2img
                 p.scripts.postprocess_batch(p, x_samples_ddim, batch_number=n)
 
                 p.prompts = p.all_prompts[n * p.batch_size:(n + 1) * p.batch_size]
@@ -899,7 +971,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
 
             save_samples = p.save_samples()
 
-            for i, x_sample in enumerate(x_samples_ddim):
+            for i, x_sample in enumerate(x_samples_ddim): #MJ: len(x_samples_ddim)= 1 or 4
                 p.batch_index = i
 
                 x_sample = 255. * np.moveaxis(x_sample.cpu().numpy(), 0, 2)
@@ -917,9 +989,11 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                 image = Image.fromarray(x_sample)
 
                 if p.scripts is not None:
+                    
                     pp = scripts.PostprocessImageArgs(image)
                     p.scripts.postprocess_image(p, pp)
                     image = pp.image
+                    
                 if p.color_corrections is not None and i < len(p.color_corrections):
                     if save_samples and opts.save_images_before_color_correction:
                         image_without_cc = apply_overlay(image, p.paste_to, i, p.overlay_images)
@@ -951,13 +1025,15 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
 
                     if opts.return_mask_composite:
                         output_images.append(image_mask_composite)
-
+            #end for i, x_sample in enumerate(x_samples_ddim)
+            
             del x_samples_ddim
 
             devices.torch_gc()
 
             state.nextjob()
-
+        #for n in range(p.n_iter)
+        
         p.color_corrections = None
 
         index_of_first_image = 0
@@ -1009,7 +1085,10 @@ def old_hires_fix_first_pass_dimensions(width, height):
 
 
 @dataclass(repr=False)
-class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
+class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing): 
+    #MJ: this class also defines  
+    # def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts)
+        
     enable_hr: bool = False
     denoising_strength: float = 0.75
     firstphase_width: int = 0
@@ -1134,6 +1213,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
                 self.extra_generation_params["Hires upscaler"] = self.hr_upscaler
 
     def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
+        
         self.sampler = sd_samplers.create_sampler(self.sampler_name, self.sd_model)
 
         x = self.rng.next()
@@ -1344,14 +1424,18 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
 
 @dataclass(repr=False)
 class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
+    
     init_images: list = None
-    resize_mode: int = 0
+    
+    resize_mode: int = 0 #MJ: resize image to specific H and W
     denoising_strength: float = 0.75
     image_cfg_scale: float = None
+    
     mask: Any = None
     mask_blur_x: int = 4
     mask_blur_y: int = 4
     mask_blur: int = None
+    
     inpainting_fill: int = 0
     inpaint_full_res: bool = True
     inpaint_full_res_padding: int = 0
@@ -1362,7 +1446,9 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
     image_mask: Any = field(default=None, init=False)
 
     nmask: torch.Tensor = field(default=None, init=False)
+    
     image_conditioning: torch.Tensor = field(default=None, init=False)
+    
     init_img_hash: str = field(default=None, init=False)
     mask_for_overlay: Image = field(default=None, init=False)
     init_latent: torch.Tensor = field(default=None, init=False)
@@ -1385,14 +1471,15 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         if isinstance(value, int):
             self.mask_blur_x = value
             self.mask_blur_y = value
-
+            
+    #MJ: called from StableDiffusionProcessingImg2Img
     def init(self, all_prompts, all_seeds, all_subseeds):
         self.image_cfg_scale: float = self.image_cfg_scale if shared.sd_model.cond_stage_key == "edit" else None
 
-        self.sampler = sd_samplers.create_sampler(self.sampler_name, self.sd_model)
+        self.sampler = sd_samplers.create_sampler(self.sampler_name, self.sd_model) #MJ: create the sampler in init()
         crop_region = None
 
-        image_mask = self.image_mask
+        image_mask = self.image_mask #MJ: created by seamless tile inpainting script: p.image_mask
 
         if image_mask is not None:
             # image_mask is passed in as RGBA by Gradio to support alpha masks,
@@ -1414,7 +1501,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
                 np_mask = cv2.GaussianBlur(np_mask, (1, kernel_size), self.mask_blur_y)
                 image_mask = Image.fromarray(np_mask)
 
-            if self.inpaint_full_res:
+            if self.inpaint_full_res: #MJ: = 0
                 self.mask_for_overlay = image_mask
                 mask = image_mask.convert('L')
                 crop_region = masking.get_crop_region(np.array(mask), self.inpaint_full_res_padding)
@@ -1424,21 +1511,23 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
                 mask = mask.crop(crop_region)
                 image_mask = images.resize_image(2, mask, self.width, self.height)
                 self.paste_to = (x1, y1, x2-x1, y2-y1)
-            else:
+            else: #MJ: self.inpaint_full_res = 0
                 image_mask = images.resize_image(self.resize_mode, image_mask, self.width, self.height)
                 np_mask = np.array(image_mask)
                 np_mask = np.clip((np_mask.astype(np.float32)) * 2, 0, 255).astype(np.uint8)
                 self.mask_for_overlay = Image.fromarray(np_mask)
 
             self.overlay_images = []
-
-        latent_mask = self.latent_mask if self.latent_mask is not None else image_mask
+        #end if image_mask is not None
+        
+        latent_mask = self.latent_mask if self.latent_mask is not None else image_mask #MJ: self.latent_mask = None; are we in the latent space? Why use the term "latent_mask"?
 
         add_color_corrections = opts.img2img_color_correction and self.color_corrections is None
         if add_color_corrections:
             self.color_corrections = []
         imgs = []
-        for img in self.init_images:
+        
+        for img in self.init_images: #MJ:len(self.init_images) =1: img.size=(1024,1024)= tile: type(self.init_images) = <class 'list'> #MJ: set by seamless tile inpainting script
 
             # Save init image
             if opts.save_init_img:
@@ -1469,12 +1558,13 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
                 self.color_corrections.append(setup_color_correction(image))
 
             image = np.array(image).astype(np.float32) / 255.0
-            image = np.moveaxis(image, 2, 0)
+            image = np.moveaxis(image, 2, 0) #MJ: (H, W, C) => (C,H,W): This is a common operation when preparing image data for certain deep learning frameworks that expect the channel dimension to be the first dimension, as opposed to the last (which is the standard for image representations in libraries like PIL or OpenCV).
 
             imgs.append(image)
-
+        #for img in self.init_images
+        
         if len(imgs) == 1:
-            batch_images = np.expand_dims(imgs[0], axis=0).repeat(self.batch_size, axis=0)
+            batch_images = np.expand_dims(imgs[0], axis=0).repeat(self.batch_size, axis=0) #MJ: imgs[0] = numpy.nparray
             if self.overlay_images is not None:
                 self.overlay_images = self.overlay_images * self.batch_size
 
@@ -1490,50 +1580,59 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         image = torch.from_numpy(batch_images)
         image = image.to(shared.device, dtype=devices.dtype_vae)
 
-        if opts.sd_vae_encode_method != 'Full':
+        if opts.sd_vae_encode_method != 'Full': #MJ: opts.sd_vae_encode_method = 'FULL'
             self.extra_generation_params['VAE Encoder'] = opts.sd_vae_encode_method
 
-        self.init_latent = images_tensor_to_samples(image, approximation_indexes.get(opts.sd_vae_encode_method), self.sd_model)
-        devices.torch_gc()
+        self.init_latent = images_tensor_to_samples(image, approximation_indexes.get(opts.sd_vae_encode_method), self.sd_model) #MJ:  x_latent = model.get_first_stage_encoding(model.encode_first_stage(image))
+        devices.torch_gc() #MJ: opts.sd_vae_encode_method ='FULL'
 
         if self.resize_mode == 3:
             self.init_latent = torch.nn.functional.interpolate(self.init_latent, size=(self.height // opt_f, self.width // opt_f), mode="bilinear")
 
         if image_mask is not None:
-            init_mask = latent_mask
+            init_mask = latent_mask #MJ: = image_mask: latent_mask = self.latent_mask if self.latent_mask is not None else image_mask #MJ: self.latent_mask = None; are we in the latent space? Why use the term "latent_mask"?
             latmask = init_mask.convert('RGB').resize((self.init_latent.shape[3], self.init_latent.shape[2]))
             latmask = np.moveaxis(np.array(latmask, dtype=np.float32), 2, 0) / 255
             latmask = latmask[0]
             latmask = np.around(latmask)
-            latmask = np.tile(latmask[None], (4, 1, 1))
+            latmask = np.tile(latmask[None], (4, 1, 1)) #MJ: The resulting latmask array will have a shape (4, a, b) where a and b are the original dimensions of latmask.
 
-            self.mask = torch.asarray(1.0 - latmask).to(shared.device).type(self.sd_model.dtype)
-            self.nmask = torch.asarray(latmask).to(shared.device).type(self.sd_model.dtype)
+            self.mask = torch.asarray(1.0 - latmask).to(shared.device).type(self.sd_model.dtype) #MJ: "mask" for the bg
+            self.nmask = torch.asarray(latmask).to(shared.device).type(self.sd_model.dtype)      #MJ: "mask" for the fg  
 
             # this needs to be fixed to be done in sample() using actual seeds for batches
             if self.inpainting_fill == 2:
                 self.init_latent = self.init_latent * self.mask + create_random_tensors(self.init_latent.shape[1:], all_seeds[0:self.init_latent.shape[0]]) * self.nmask
             elif self.inpainting_fill == 3:
                 self.init_latent = self.init_latent * self.mask
-
+        #MJ: def img2img_image_conditioning(self, source_image, latent_image, image_mask=None): self: StableDiffusionProcessingImg2Img(
         self.image_conditioning = self.img2img_image_conditioning(image * 2 - 1, self.init_latent, image_mask)
-
+    #End def init()
+    
+    #MJ: StableDiffusionProcessingImg2Img: This class incorporates both DDPM model and the Sampler
     def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
-        x = self.rng.next()
+        x = self.rng.next() #MJ: Generate a random image: x.shape = (1,4,128,128) <= (1024/8,1024/8); (1,4,512,512) <= (4096/8, 4096/8)
 
         if self.initial_noise_multiplier != 1.0:
             self.extra_generation_params["Noise multiplier"] = self.initial_noise_multiplier
             x *= self.initial_noise_multiplier
 
-        samples = self.sampler.sample_img2img(self, self.init_latent, x, conditioning, unconditional_conditioning, image_conditioning=self.image_conditioning)
 
-        if self.mask is not None:
-            samples = samples * self.nmask + self.init_latent * self.mask
+        samples = self.sampler.sample_img2img(self, self.init_latent, x, conditioning, unconditional_conditioning,
+                                              image_conditioning=self.image_conditioning)
+       
+                   
+        #MJ: self.init_latent.shape = (1,4,128,128)
+        
+        if self.mask is not None: #MJ: shape of self.init_latent = (1,4,512,512): What is the purpose of this postprocessing?
+         
+            samples = samples * self.nmask + self.init_latent * self.mask #MJ: self.mask for the bg, self.nmask for the fg; use this mask operation whether you use inpaint model or img2img model
 
         del x
         devices.torch_gc()
 
         return samples
-
+    #End def sample()
+    
     def get_token_merging_ratio(self, for_hr=False):
         return self.token_merging_ratio or ("token_merging_ratio" in self.override_settings and opts.token_merging_ratio) or opts.token_merging_ratio_img2img or opts.token_merging_ratio

@@ -20,7 +20,7 @@ class ScriptSeed(scripts.ScriptBuiltinUI):
         return "Seed"
 
     def show(self, is_img2img):
-        return scripts.AlwaysVisible
+        return scripts.AlwaysVisible  #MJ: AlwaysVisible is the field defined in modules.scripts module
 
     def ui(self, is_img2img):
         with gr.Row(elem_id=self.elem_id("seed_row")):

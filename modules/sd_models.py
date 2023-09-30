@@ -24,7 +24,7 @@ model_path = os.path.abspath(os.path.join(paths.models_path, model_dir))
 checkpoints_list = {}
 checkpoint_aliases = {}
 checkpoint_alisases = checkpoint_aliases  # for compatibility with old name
-checkpoints_loaded = collections.OrderedDict()
+checkpoints_loaded = collections.OrderedDict() #MJ: create checkpoints_loaded while importing modules.sd_models
 
 
 def replace_key(d, key, new_key, value):
@@ -91,7 +91,11 @@ class CheckpointInfo:
             self.ids += [self.shorthash, self.sha256, f'{self.name} [{self.shorthash}]', f'{self.name_for_extra} [{self.shorthash}]']
 
     def register(self):
-        checkpoints_list[self.title] = self
+        checkpoints_list[self.title] = self  #MJ: here??? 
+        
+        #MJ: Global State Changes: Another part of your codebase, perhaps unrelated to the CheckpointInfo class, 
+        # may be listening for changes or events related to checkpoints_list. When you add an item to checkpoints_list, it could trigger code in another location that accesses modules.shared.sd_model.
+ 
         for id in self.ids:
             checkpoint_aliases[id] = self
 
@@ -149,18 +153,18 @@ def list_models():
         model_url = "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors"
 
     model_list = modelloader.load_models(model_path=model_path, model_url=model_url, command_path=shared.cmd_opts.ckpt_dir, ext_filter=[".ckpt", ".safetensors"], download_name="v1-5-pruned-emaonly.safetensors", ext_blacklist=[".vae.ckpt", ".vae.safetensors"])
-
-    if os.path.exists(cmd_ckpt):
+    #MJ: model_list = '/home/moon/stable-diffusion-webui/models/Stable-diffusion/v1-5-pruned-emaonly.safetensors'
+    if os.path.exists(cmd_ckpt): #MJ: false
         checkpoint_info = CheckpointInfo(cmd_ckpt)
         checkpoint_info.register()
 
         shared.opts.data['sd_model_checkpoint'] = checkpoint_info.title
-    elif cmd_ckpt is not None and cmd_ckpt != shared.default_sd_model_file:
+    elif cmd_ckpt is not None and cmd_ckpt != shared.default_sd_model_file:  #MJ: shared = modules.shared has obtained the status of class Shared
         print(f"Checkpoint in --ckpt argument not found (Possible it was moved to {model_path}: {cmd_ckpt}", file=sys.stderr)
 
     for filename in model_list:
-        checkpoint_info = CheckpointInfo(filename)
-        checkpoint_info.register()
+        checkpoint_info = CheckpointInfo(filename) #MJ: filename = '/home/moon/stable-diffusion-webui/models/Stable-diffusion/v1-5-pruned-emaonly.safetensors'
+        checkpoint_info.register() ##MJ Here??
 
 
 re_strip_checksum = re.compile(r"\s*\[[^]]+]\s*$")
@@ -478,7 +482,8 @@ sd2_clip_weight = 'cond_stage_model.model.transformer.resblocks.0.attn.in_proj_w
 sdxl_clip_weight = 'conditioner.embedders.1.model.ln_final.weight'
 sdxl_refiner_clip_weight = 'conditioner.embedders.0.model.ln_final.weight'
 
-
+#
+# devices.first_time_calculate: MJ: called by model_data = SdModelData() below:
 class SdModelData:
     def __init__(self):
         self.sd_model = None
@@ -486,17 +491,47 @@ class SdModelData:
         self.was_loaded_at_least_once = False
         self.lock = threading.Lock()
 
-    def get_sd_model(self):
+    def get_sd_model(self): #MJ: called by property shared.sd_model in load_model() # noqa: B018
+        #from
+        # def load_model(): #MJ:  load_model() is activated by  the thread in initialize_rest()
+        
+        # """
+        # Accesses shared.sd_model property to load model.
+        # After it's available, if it has been loaded before this access by some extension,
+        # its optimization may be None because the list of optimizaers has neet been filled
+        # by that time, so we apply optimization again.
+        # """
+
+        # shared.sd_model  # noqa: B018
+
+        # if sd_hijack.current_optimizer is None:
+        #     sd_hijack.apply_optimizations()
+
+        # from modules import devicesion()
+
         if self.was_loaded_at_least_once:
             return self.sd_model
 
         if self.sd_model is None:
-            with self.lock:
+            
+            with self.lock: #MJ: the lock ensures that if multiple threads are trying to access or set self.sd_model,
+                #only one thread can do so at a time, preventing potential race conditions or unpredictable behavior. 
+                
+                # The lock ensures that even if multiple threads call get_sd_model() at roughly the same time 
+                # and find self.sd_model to be None, only one of them will proceed to load the model, 
+                # and the others will wait. Once the model is loaded by one thread, the others will skip the loading process, 
+                # thanks to the double-checked locking pattern, ensuring the model is loaded only once.               
                 if self.sd_model is not None or self.was_loaded_at_least_once:
                     return self.sd_model
 
                 try:
-                    load_model()
+                    load_model() #MJ: defined below in the current module file: def load_model(checkpoint_info=None, already_loaded_state_dict=None)
+                                  # => sd_model = instantiate_from_config(sd_config.model) #MJ: Here is where the sd main model is uploaded
+                                  # => print(f"Creating model from config: {checkpoint_config}") 
+                                  # #MJ: sd_model = LatentDiffusion is done here
+                                  
+                                  # MJ: load_model() which is the target function of a thread started 
+                                  # in initialize_rest() leads to the call of get_sd_model()
 
                 except Exception as e:
                     errors.display(e, "loading stable diffusion model", full_traceback=True)
@@ -504,7 +539,7 @@ class SdModelData:
                     print("Stable diffusion model failed to load", file=sys.stderr)
                     self.sd_model = None
 
-        return self.sd_model
+        return self.sd_model  #MJ: self.sd_model was  set by  model_data.set_sd_model(sd_model) in load_model() 
 
     def set_sd_model(self, v, already_loaded=False):
         self.sd_model = v
@@ -521,8 +556,8 @@ class SdModelData:
         if v is not None:
             self.loaded_sd_models.insert(0, v)
 
-
-model_data = SdModelData()
+#MJ: create a field "model_data" of module "modules.sd_models"
+model_data = SdModelData() #MJ: model_data is used in load_model() defined below in the current module (this file)
 
 
 def get_empty_cond(sd_model):
@@ -567,7 +602,7 @@ def send_model_to_trash(m):
 
 def load_model(checkpoint_info=None, already_loaded_state_dict=None):
     from modules import sd_hijack
-    checkpoint_info = checkpoint_info or select_checkpoint()
+    checkpoint_info = checkpoint_info or select_checkpoint() #MJ: = '/home/moon/stable-diffusion-webui/models/Stable-diffusion/v1-5-pruned-emaonly.safetensors'
 
     timer = Timer()
 
@@ -588,18 +623,19 @@ def load_model(checkpoint_info=None, already_loaded_state_dict=None):
 
     timer.record("find config")
 
-    sd_config = OmegaConf.load(checkpoint_config)
+    sd_config = OmegaConf.load(checkpoint_config)  #MJ: load config
     repair_config(sd_config)
 
     timer.record("load config")
 
-    print(f"Creating model from config: {checkpoint_config}")
+    sd_model = None
+    print(f"Creating model from config: {checkpoint_config}") #MJ: checkpoint_config= /home/moon/stable-diffusion-webui/configs/v1-inference.yaml;shared.sd_model = LatentDiffusion is done here
 
     sd_model = None
     try:
         with sd_disable_initialization.DisableInitialization(disable_clip=clip_is_included_into_sd or shared.cmd_opts.do_not_download_clip):
             with sd_disable_initialization.InitializeOnMeta():
-                sd_model = instantiate_from_config(sd_config.model)
+                sd_model = instantiate_from_config(sd_config.model) #MJ: sd_config.model = 'ldm.models.diffusion.ddpm.LatentDiffusion; 
 
     except Exception as e:
         errors.display(e, "creating model quickly", full_traceback=True)
@@ -608,7 +644,8 @@ def load_model(checkpoint_info=None, already_loaded_state_dict=None):
         print('Failed to create model quickly; will retry using slow method.', file=sys.stderr)
 
         with sd_disable_initialization.InitializeOnMeta():
-            sd_model = instantiate_from_config(sd_config.model)
+            
+            sd_model = instantiate_from_config(sd_config.model) #MJ: Here is where the sd main model is uploaded
 
     sd_model.used_config = checkpoint_config
 
@@ -634,7 +671,9 @@ def load_model(checkpoint_info=None, already_loaded_state_dict=None):
     timer.record("hijack")
 
     sd_model.eval()
+    
     model_data.set_sd_model(sd_model)
+    
     model_data.was_loaded_at_least_once = True
 
     sd_hijack.model_hijack.embedding_db.load_textual_inversion_embeddings(force_reload=True)  # Reload embeddings after model load as they may or may not fit the model

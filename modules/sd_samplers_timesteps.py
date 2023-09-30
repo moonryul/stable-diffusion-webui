@@ -92,18 +92,21 @@ class CompVisSampler(sd_samplers_common.Sampler):
         timesteps = torch.clip(torch.asarray(list(range(0, 1000, 1000 // steps)), device=devices.device) + 1, 0, 999)
 
         return timesteps
-
+    #MJ:  samples = self.sampler.sample_img2img(self, self.init_latent, x, conditioning, unconditional_conditioning,image_conditioning=self.image_conditioning)
     def sample_img2img(self, p, x, noise, conditioning, unconditional_conditioning, steps=None, image_conditioning=None):
-        steps, t_enc = sd_samplers_common.setup_img2img_steps(p, steps)
+        
+        steps, t_enc = sd_samplers_common.setup_img2img_steps(p, steps) #MJ: t_enc = steps * denoising_strength = 20 *0.2 = 4, for example
 
-        timesteps = self.get_timesteps(p, steps)
-        timesteps_sched = timesteps[:t_enc]
+        timesteps = self.get_timesteps(p, steps) #MJ: timesteps = 
+        timesteps_sched = timesteps[:t_enc] #MJ: timesteps[0:4] = [ 1, 51, 101, 151];  timesteps[20]  implying random noise
 
         alphas_cumprod = shared.sd_model.alphas_cumprod
-        sqrt_alpha_cumprod = torch.sqrt(alphas_cumprod[timesteps[t_enc]])
+        sqrt_alpha_cumprod = torch.sqrt(alphas_cumprod[timesteps[t_enc]]) #MJ: timesteps[t_enc]= timesteps[4]=201
         sqrt_one_minus_alpha_cumprod = torch.sqrt(1 - alphas_cumprod[timesteps[t_enc]])
 
-        xi = x * sqrt_alpha_cumprod + noise * sqrt_one_minus_alpha_cumprod
+        xi = x * sqrt_alpha_cumprod + noise * sqrt_one_minus_alpha_cumprod #MJ: Get the blurred version of the initial image:xi = x_{init} = x_{start}
+        #MJ: xi= self.sqrt_alpha_bar[index] * x0 + self.sqrt_1m_alpha_bar[index] * noise, index = time step t;
+        # refer: x0 = sqrt_recip_alpha_bar * x - sqrt_recip_m1_alpha_bar * e_t
 
         if opts.img2img_extra_noise > 0:
             p.extra_generation_params["Extra noise"] = opts.img2img_extra_noise
@@ -113,7 +116,7 @@ class CompVisSampler(sd_samplers_common.Sampler):
             xi += noise * opts.img2img_extra_noise * sqrt_alpha_cumprod
 
         extra_params_kwargs = self.initialize(p)
-        parameters = inspect.signature(self.func).parameters
+        parameters = inspect.signature(self.func).parameters #MJ: self.func = <function ddim ..>
 
         if 'timesteps' in parameters:
             extra_params_kwargs['timesteps'] = timesteps_sched
@@ -121,22 +124,22 @@ class CompVisSampler(sd_samplers_common.Sampler):
             extra_params_kwargs['is_img2img'] = True
 
         self.model_wrap_cfg.init_latent = x
-        self.last_latent = x
+        self.last_latent = x  #MJ: it modifies self, but self.last_latent is not used here
         self.sampler_extra_args = {
-            'cond': conditioning,
-            'image_cond': image_conditioning,
-            'uncond': unconditional_conditioning,
+            'cond': conditioning, #MJ: len=1
+            'image_cond': image_conditioning, #MJ: shape= (1,5,1,1) = dummy image conditioning
+            'uncond': unconditional_conditioning, #MJ: len =1
             'cond_scale': p.cfg_scale,
             's_min_uncond': self.s_min_uncond
         }
-
+        #MJ: def launch_sampling(self, steps, func): func=ddim
         samples = self.launch_sampling(t_enc + 1, lambda: self.func(self.model_wrap_cfg, xi, extra_args=self.sampler_extra_args, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         if self.model_wrap_cfg.padded_cond_uncond:
             p.extra_generation_params["Pad conds"] = True
 
         return samples
-
+    #MJ: sample() vs sample_img2img()
     def sample(self, p, x, conditioning, unconditional_conditioning, steps=None, image_conditioning=None):
         steps = steps or p.steps
         timesteps = self.get_timesteps(p, steps)
@@ -155,6 +158,7 @@ class CompVisSampler(sd_samplers_common.Sampler):
             'cond_scale': p.cfg_scale,
             's_min_uncond': self.s_min_uncond
         }
+        #MJ: def launch_sampling(self, steps, func):
         samples = self.launch_sampling(steps, lambda: self.func(self.model_wrap_cfg, x, extra_args=self.sampler_extra_args, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         if self.model_wrap_cfg.padded_cond_uncond:

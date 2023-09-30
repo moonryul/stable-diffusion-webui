@@ -168,8 +168,8 @@ def get_available_vram():
         stats = torch.cuda.memory_stats(shared.device)
         mem_active = stats['active_bytes.all.current']
         mem_reserved = stats['reserved_bytes.all.current']
-        mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
-        mem_free_torch = mem_reserved - mem_active
+        mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device()) #MJ: mem_free_cuda is the memory that hasn't been reserved by any application, including PyTorch. It's truly free memory from CUDA's perspective.
+        mem_free_torch = mem_reserved - mem_active #MJ: Thus, mem_free_torch represents the GPU memory that PyTorch has reserved but is not actively using at the moment. This memory is within PyTorch's memory management system and can be reused for new tensors without additional CUDA allocations.
         mem_free_total = mem_free_cuda + mem_free_torch
         return mem_free_total
     else:
@@ -177,7 +177,7 @@ def get_available_vram():
 
 
 # see https://github.com/basujindal/stable-diffusion/pull/117 for discussion
-def split_cross_attention_forward_v1(self, x, context=None, mask=None, **kwargs):
+def split_cross_attention_forward_v1(self, x, context=None, mask=None, **kwargs): #MJ: this method belongs to a class defined elsewhere, whose object is bound to self
     h = self.heads
 
     q_in = self.to_q(x)
@@ -217,16 +217,88 @@ def split_cross_attention_forward_v1(self, x, context=None, mask=None, **kwargs)
     return self.to_out(r2)
 
 
-# taken from https://github.com/Doggettx/stable-diffusion and modified
-def split_cross_attention_forward(self, x, context=None, mask=None, **kwargs):
-    h = self.heads
+# taken from https://github.com/Doggettx/stable-diffusion and modified: Allows to use resolutions that require up to 64x more VRAM than possible on the default CompVis build
 
-    q_in = self.to_q(x)
+
+#MJ:  Stable Diffusion v1 refers to a specific configuration of the model architecture that uses 
+# a **downsampling-factor 8** autoencoder with an **860M UNet** and **CLIP ViT-L/14 text encoder for the diffusion model**.
+# The model was pretrained on 256x256 images and then finetuned on 512x512 images
+
+
+#MJ: cf:
+
+# class CrossAttention(nn.Module):
+#     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.):
+#         super().__init__()
+#         inner_dim = dim_head * heads
+#         context_dim = default(context_dim, query_dim)
+
+#         self.scale = dim_head ** -0.5
+#         self.heads = heads
+
+#         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+#         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+#         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+#         self.to_out = nn.Sequential(
+#             nn.Linear(inner_dim, query_dim),
+#             nn.Dropout(dropout)
+#         )
+
+#     def forward(self, x, context=None, mask=None):
+#         h = self.heads
+
+#         q = self.to_q(x)
+#         context = default(context, x)
+#         k = self.to_k(context)
+#         v = self.to_v(context)
+
+#         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
+
+#         # force cast to fp32 to avoid overflowing
+#         if _ATTN_PRECISION =="fp32":
+#             with torch.autocast(enabled=False, device_type = 'cuda'):
+#                 q, k = q.float(), k.float()
+#                 sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
+#         else:
+#             sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
+        
+#         del q, k
+    
+#         if exists(mask):
+#             mask = rearrange(mask, 'b ... -> b (...)')
+#             max_neg_value = -torch.finfo(sim.dtype).max
+#             mask = repeat(mask, 'b j -> (b h) () j', h=h)
+#             sim.masked_fill_(~mask, max_neg_value)
+
+#         # attention, what we cannot get enough of
+#         sim = sim.softmax(dim=-1)
+
+#         out = einsum('b i j, b j d -> b i d', sim, v)
+#         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
+#         return self.to_out(out)
+
+
+#MJ: split_corss_attention_forward is used in place of CrossAttention.forward
+# because of the declaration:
+#ldm.modules.attention.CrossAttention.forward = sub_quad_attention_forward
+# The memory required for Transformer: https://stats.stackexchange.com/questions/563919/formula-to-compute-approximate-memory-requirements-of-transformer-models
+ #https://stackoverflow.com/questions/65703260/computational-complexity-of-self-attention-in-the-transformer-model
+ 
+        
+def split_cross_attention_forward(self, x, context=None, mask=None, **kwargs):
+    h = self.heads #MJ: = 8
+
+    q_in = self.to_q(x) #MJ: q_in: q_{inner_dim} with self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
     context = default(context, x)
 
     context_k, context_v = hypernetwork.apply_hypernetworks(shared.loaded_hypernetworks, context)
     k_in = self.to_k(context_k)
     v_in = self.to_v(context_v)
+    
+    #MJ:
+#   k = self.to_k(context)
+#   v = self.to_v(context)
 
     dtype = q_in.dtype
     if shared.opts.upcast_attn:
@@ -235,28 +307,44 @@ def split_cross_attention_forward(self, x, context=None, mask=None, **kwargs):
     with devices.without_autocast(disable=not shared.opts.upcast_attn):
         k_in = k_in * self.scale
 
-        del context, x
+        del context, x #MJ: (h d) is splitting a single dimension into two.(b h) is combining two dimensions into one.
 
         q, k, v = (rearrange(t, 'b n (h d) -> (b h) n d', h=h) for t in (q_in, k_in, v_in))
-        del q_in, k_in, v_in
+        del q_in, k_in, v_in #MJ: (2 262144, 8*40) (B, N, C)=> (2*8, 262144, 40), d=40, b=2, h=8,n=262144
 
-        r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
+        r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype) #MJ: shape =(16,262144,40)
 
-        mem_free_total = get_available_vram()
+        #MJ: mem_free_total = get_available_vram()
+        #The following is the content of get_available_vram():
+        if shared.device.type == 'cuda':
+            stats = torch.cuda.memory_stats(shared.device)
+            mem_active = stats['active_bytes.all.current']
+            mem_reserved = stats['reserved_bytes.all.current']
+            mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device()) #MJ: mem_free_cuda is the memory that hasn't been reserved by any application, including PyTorch. It's truly free memory from CUDA's perspective.
+            mem_free_torch = mem_reserved - mem_active #MJ: Thus, mem_free_torch represents the GPU memory that PyTorch has reserved but is not actively using at the moment. This memory is within PyTorch's memory management system and can be reused for new tensors without additional CUDA allocations.
+            mem_free_total = mem_free_cuda + mem_free_torch
+            return mem_free_total
+        else:
+            mem_free_total = psutil.virtual_memory().available
+    
+    
 
-        gb = 1024 ** 3
-        tensor_size = q.shape[0] * q.shape[1] * k.shape[1] * q.element_size()
-        modifier = 3 if q.element_size() == 2 else 2.5
-        mem_required = tensor_size * modifier
+        gb = 1024 ** 3 #MJ: GB, q = Q matrix
+        tensor_size = q.shape[0] * q.shape[1] * k.shape[1] * q.element_size() #MJ: = 16  * 262144 (512x512) * 262144 *2 bytes (float16)
+        modifier = 3 if q.element_size() == 2 else 2.5 #MJ: Empirical multiplier to account the auxiliary memory to store the data itself
+        mem_required = tensor_size * modifier #MJ: n summary, mem_required estimates the memory needed for an operation (possibly a matrix multiplication) between tensors q and k, along with some additional overhead (as represented by the modifier)
         steps = 1
 
         if mem_required > mem_free_total:
-            steps = 2 ** (math.ceil(math.log(mem_required / mem_free_total, 2)))
-            # print(f"Expected tensor size:{tensor_size/gb:0.1f}GB, cuda free:{mem_free_cuda/gb:0.1f}GB "
-            #       f"torch free:{mem_free_torch/gb:0.1f} total:{mem_free_total/gb:0.1f} steps:{steps}")
+            steps = 2 ** (math.ceil(math.log(mem_required / mem_free_total, 2))) #MJ: 2**0, 2**2, 2**3, ... 
+            print(f"Expected tensor size:{tensor_size/gb:0.1f}GB, cuda free:{mem_free_cuda/gb:0.1f}GB "
+                   f"torch free:{mem_free_torch/gb:0.1f} total:{mem_free_total/gb:0.1f} steps:{steps}")
 
-        if steps > 64:
-            max_res = math.floor(math.sqrt(math.sqrt(mem_free_total / 2.5)) / 8) * 64
+        if steps > 64: #MJ: 2.5:  for every 2.5 bytes of free memory, only 1 byte is effectively usable for the tensor. The divisor "2.5" might be derived from some heuristic or specific memory management consideration  
+            max_res = math.floor( math.sqrt(   math.sqrt(mem_free_total / 2.5)  ) / 8 ) * 64
+            
+            #MJ: max_res/ 64 =  math.floor( math.sqrt(   math.sqrt(mem_free_total / 2.5)  ) / 8 )
+            #MJ: Taking the fourth root may come from the fact that the memory consumption increases exponentially with the tensor dimensions, possibly due to some 2D convolution or matrix multiplication operation
             raise RuntimeError(f'Not enough memory, use lower resolution (max approx. {max_res}x{max_res}). '
                                f'Need: {mem_required / 64 / gb:0.1f}GB free, Have:{mem_free_total / gb:0.1f}GB free')
 
@@ -279,6 +367,20 @@ def split_cross_attention_forward(self, x, context=None, mask=None, **kwargs):
     del r1
 
     return self.to_out(r2)
+
+#MJ:
+
+# class SdOptimizationDoggettx(SdOptimization):
+#     name = "Doggettx"
+#     cmd_opt = "opt_split_attention"
+#     priority = 90
+
+#     def apply(self):
+#         ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward
+#         ldm.modules.diffusionmodules.model.AttnBlock.forward = cross_attention_attnblock_forward
+#         sgm.modules.attention.CrossAttention.forward = split_cross_attention_forward
+#         sgm.modules.diffusionmodules.model.AttnBlock.forward = cross_attention_attnblock_forward
+
 
 
 # -- Taken from https://github.com/invoke-ai/InvokeAI and modified --

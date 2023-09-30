@@ -36,7 +36,7 @@ then
 fi
 
 # Name of the subdirectory (defaults to stable-diffusion-webui)
-if [[ -z "${clone_dir}" ]]
+if [[ -z "${clone_dir}" ]]  #-z is a test operator that returns true if the string operand it operates on has zero length.
 then
     clone_dir="stable-diffusion-webui"
 fi
@@ -65,7 +65,7 @@ then
 fi
 
 # this script cannot be run as root by default
-can_run_as_root=0
+can_run_as_root=0 
 
 # read any command line flags to the webui.sh script
 while getopts "f" flag > /dev/null 2>&1
@@ -200,13 +200,13 @@ then
     cd "${install_dir}"/"${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
     if [[ ! -d "${venv_dir}" ]]
     then
-        "${python_cmd}" -m venv "${venv_dir}"
+        "${python_cmd}" -m venv "${venv_dir}"  #MJ: create python venv at "${venv_dir}" 
         first_launch=1
     fi
     # shellcheck source=/dev/null
     if [[ -f "${venv_dir}"/bin/activate ]]
     then
-        source "${venv_dir}"/bin/activate
+        source "${venv_dir}"/bin/activate  #MJ: Activate venv
     else
         printf "\n%s\n" "${delimiter}"
         printf "\e[1m\e[31mERROR: Cannot activate python venv, aborting...\e[0m"
@@ -240,13 +240,15 @@ while [[ "$KEEP_GOING" -eq "1" ]]; do
         printf "Accelerating launch.py..."
         printf "\n%s\n" "${delimiter}"
         prepare_tcmalloc
-        accelerate launch --num_cpu_threads_per_process=6 "${LAUNCH_SCRIPT}" "$@"
+        accelerate launch  --num_cpu_threads_per_process=6 "${LAUNCH_SCRIPT}" "$@"
     else
         printf "\n%s\n" "${delimiter}"
         printf "Launching launch.py..."
         printf "\n%s\n" "${delimiter}"
         prepare_tcmalloc
-        "${python_cmd}" -u "${LAUNCH_SCRIPT}" "$@"
+        #python -m debugpy --listen 5678 ./myscript.py
+        "${python_cmd}" -m debugpy --listen 7890 --wait-for-client  "${LAUNCH_SCRIPT}" "$@"
+        #"${python_cmd}" -u "${LAUNCH_SCRIPT}" "$@" #MJ: all arguments given to the shell script through to the Python script.
     fi
 
     if [[ ! -f tmp/restart ]]; then

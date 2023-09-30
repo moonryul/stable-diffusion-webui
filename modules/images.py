@@ -71,19 +71,22 @@ def split_grid(image, tile_w=512, tile_h=512, overlap=64):
     non_overlap_width = tile_w - overlap
     non_overlap_height = tile_h - overlap
 
+   #MJ: Compute the "matrix" of tiles with cols columns and rows rows
     cols = math.ceil((w - overlap) / non_overlap_width)
     rows = math.ceil((h - overlap) / non_overlap_height)
 
+    #MJ: compute the length and width of each tile
     dx = (w - tile_w) / (cols - 1) if cols > 1 else 0
     dy = (h - tile_h) / (rows - 1) if rows > 1 else 0
 
     grid = Grid([], tile_w, tile_h, w, h, overlap)
+    
     for row in range(rows):
         row_images = []
 
-        y = int(row * dy)
+        y = int(row * dy)  #MJ: the  y location of the current tile
 
-        if y + tile_h >= h:
+        if y + tile_h >= h:  #MJ: Adjust the y so that the tile remains within the image
             y = h - tile_h
 
         for col in range(cols):
@@ -93,11 +96,13 @@ def split_grid(image, tile_w=512, tile_h=512, overlap=64):
                 x = w - tile_w
 
             tile = image.crop((x, y, x + tile_w, y + tile_h))
-
-            row_images.append([x, tile_w, tile])
-
-        grid.tiles.append([y, tile_h, row_images])
-
+            #MJ: add the tiles along the x axis
+            row_images.append([x, tile_w, tile]) #MJ: tile_w = 512
+        #for col in range(cols)
+        #MJ: add the row tiles along the y axis
+        grid.tiles.append([y, tile_h, row_images]) #MJ: tile_h = 512
+    #for row in range(rows)
+    
     return grid
 
 
@@ -766,13 +771,17 @@ def image_data(data):
 
     return gr.update(), None
 
-
+#MJ: The function returns the modified image converted to "RGB" mode. This mode has no transparency,
+# so any previously transparent areas of the image are now filled with bgcolor.
+#  Here, the function "flattens" the transparency of an image by merging it with a background color
 def flatten(img, bgcolor):
     """replaces transparency with bgcolor (example: "#ffffff"), returning an RGB mode image with no transparency"""
 
     if img.mode == "RGBA":
         background = Image.new('RGBA', img.size, bgcolor)
-        background.paste(img, mask=img)
+        background.paste(img, mask=img) #MJ: Pixels with an alpha value of 0 (fully transparent) in the mask mean that the corresponding pixel from the source image (img) will not be pasted at all. 
+          #Instead, the pixel from the background will remain unchanged.
+          # For alpha values between 0 and 255, the source image pixel will blend with the background pixel based on the degree of transparency.
         img = background
 
     return img.convert('RGB')

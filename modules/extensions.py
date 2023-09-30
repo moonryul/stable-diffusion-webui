@@ -161,5 +161,6 @@ def list_extensions():
             extension_paths.append((extension_dirname, path, dirname == extensions_builtin_dir))
 
     for dirname, path, is_builtin in extension_paths:
+        
         extension = Extension(name=dirname, path=path, enabled=dirname not in shared.opts.disabled_extensions, is_builtin=is_builtin)
         extensions.append(extension)

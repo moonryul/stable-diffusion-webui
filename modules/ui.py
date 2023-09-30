@@ -169,10 +169,11 @@ def update_token_counter(text, steps):
     return f"<span class='gr-box gr-text-input'>{token_count}/{max_length}</span>"
 
 
-class Toprow:
+class Toprow: #MJ: Toprow = Top bar in UI
     """Creates a top row UI with prompts, generate button, styles, extra little buttons for things, and enables some functionality related to their operation"""
 
     def __init__(self, is_img2img):
+        
         id_part = "img2img" if is_img2img else "txt2img"
         self.id_part = id_part
 
@@ -181,6 +182,7 @@ class Toprow:
                 with gr.Row():
                     with gr.Column(scale=80):
                         with gr.Row():
+                            #MJ: self = Toprow; used in toprow.prompt.submit(..)
                             self.prompt = gr.Textbox(label="Prompt", elem_id=f"{id_part}_prompt", show_label=False, lines=3, placeholder="Prompt (press Ctrl+Enter or Alt+Enter to generate)", elem_classes=["prompt"])
                             self.prompt_img = gr.File(label="", elem_id=f"{id_part}_prompt_image", file_count="single", type="binary", visible=False)
 
@@ -191,17 +193,20 @@ class Toprow:
 
             self.button_interrogate = None
             self.button_deepbooru = None
+            
             if is_img2img:
                 with gr.Column(scale=1, elem_classes="interrogate-col"):
                     self.button_interrogate = gr.Button('Interrogate\nCLIP', elem_id="interrogate")
                     self.button_deepbooru = gr.Button('Interrogate\nDeepBooru', elem_id="deepbooru")
 
-            with gr.Column(scale=1, elem_id=f"{id_part}_actions_column"):
+            with gr.Column(scale=1, elem_id=f"{id_part}_actions_column"): #MJ: id_part = "txt2img" or "img2img"
                 with gr.Row(elem_id=f"{id_part}_generate_box", elem_classes="generate-box"):
+                    
                     self.interrupt = gr.Button('Interrupt', elem_id=f"{id_part}_interrupt", elem_classes="generate-box-interrupt")
                     self.skip = gr.Button('Skip', elem_id=f"{id_part}_skip", elem_classes="generate-box-skip")
+                    #MJ: self.submit = Toprow.submit
                     self.submit = gr.Button('Generate', elem_id=f"{id_part}_generate", variant='primary')
-
+                       #MJ: used in toprow.submit.click(...)   
                     self.skip.click(
                         fn=lambda: shared.state.skip(),
                         inputs=[],
@@ -232,14 +237,16 @@ class Toprow:
                     )
 
                 self.ui_styles = ui_prompt_styles.UiPromptStyles(id_part, self.prompt, self.negative_prompt)
-
+        # with gr.Row(elem_id=f"{id_part}_toprow", variant="compact")
+        
         self.prompt_img.change(
             fn=modules.images.image_data,
             inputs=[self.prompt_img],
             outputs=[self.prompt, self.prompt_img],
             show_progress=False,
         )
-
+    #def __init__(self, is_img2img)
+#class Toprow
 
 def setup_progressbar(*args, **kwargs):
     pass
@@ -325,15 +332,38 @@ def create_ui():
     scripts.scripts_current = scripts.scripts_txt2img
     scripts.scripts_txt2img.initialize_scripts(is_img2img=False)
 
+    #MJ: confer https://www.gradio.app/docs/blocks for gr.Blocks.
+    
+    # The Interface class is a subclass of the Blocks class, so they share some common methods and attributes,
+    # but they have different initialization parameters and usage patterns. 
+    # The Interface class is designed for creating simple and straightforward demos,
+    # while the Blocks class is designed for creating more complex and interactive apps.
+    
+    #MJ:
+    # import gradio as gr
+
+    # def greet(name):
+    #     return "Hello " + name + "!"
+
+    # demo = gr.Interface(fn=greet, inputs="text", outputs="text")
+    
+    # if __name__ == "__main__":
+    #     demo.launch()   #Launches a simple web server that serves the demo. 
+    # Can also be used to create a public link used by anyone to access the demo from their browser by setting share=True.
+    
+    #MJ: 1) Define txt2img interface: txt2img_interface or img2img_interface will be opened as selected by the user
     with gr.Blocks(analytics_enabled=False) as txt2img_interface:
+        
         toprow = Toprow(is_img2img=False)
 
         dummy_component = gr.Label(visible=False)
 
         extra_tabs = gr.Tabs(elem_id="txt2img_extra_tabs")
-        extra_tabs.__enter__()
+        
+        extra_tabs.__enter__() #MJ: it is enclosed by extra_tabs.__exit__()
 
         with gr.Tab("Generation", id="txt2img_generation") as txt2img_generation_tab, ResizeHandleRow(equal_height=False):
+            
             with gr.Column(variant='compact', elem_id="txt2img_settings"):
                 scripts.scripts_txt2img.prepare_ui()
 
@@ -396,7 +426,7 @@ def create_ui():
 
                             scripts.scripts_txt2img.setup_ui_for_section(category)
 
-                    elif category == "batch":
+                    elif category == "batch": #MJ: batch relatd, that is, "batch count", and "batch size"
                         if not opts.dimensions_and_batch_together:
                             with FormRow(elem_id="txt2img_column_batch"):
                                 batch_count = gr.Slider(minimum=1, step=1, label='Batch count', value=1, elem_id="txt2img_batch_count")
@@ -412,7 +442,8 @@ def create_ui():
 
                     if category not in {"accordions"}:
                         scripts.scripts_txt2img.setup_ui_for_section(category)
-
+            #with gr.Column(variant='compact', elem_id="txt2img_settings")
+            
             hr_resolution_preview_inputs = [enable_hr, width, height, hr_scale, hr_resize_x, hr_resize_y]
 
             for component in hr_resolution_preview_inputs:
@@ -431,11 +462,12 @@ def create_ui():
                     outputs=[],
                     show_progress=False,
                 )
-
+            #for component in hr_resolution_preview_inputs
+            
             txt2img_gallery, generation_info, html_info, html_log = create_output_panel("txt2img", opts.outdir_txt2img_samples)
 
             txt2img_args = dict(
-                fn=wrap_gradio_gpu_call(modules.txt2img.txt2img, extra_outputs=[None, '', '']),
+                fn=wrap_gradio_gpu_call( modules.txt2img.txt2img, extra_outputs=[None, '', '']),
                 _js="submit",
                 inputs=[
                     dummy_component,
@@ -472,9 +504,26 @@ def create_ui():
                 ],
                 show_progress=False,
             )
-
+            #End txt2img_args
+            
             toprow.prompt.submit(**txt2img_args)
-            toprow.submit.click(**txt2img_args)
+            
+            toprow.submit.click(**txt2img_args) #MJ: call **txt2img_args when the submit button is clicked
+            #MJ: self.submit = gr.Button('Generate', elem_id=f"{id_part}_generate", variant='primary')
+            
+            #MJ:  txt2img_args = dict(
+                #     fn=wrap_gradio_gpu_call(modules.txt2img.txt2img, extra_outputs=[None, '', '']),
+                #     _js="submit",
+                #     inputs=[ ],
+                #    outputs=[
+                #    txt2img_gallery,
+                #    generation_info,
+                #    html_info,
+                #    html_log,
+                #],
+            #MJ: when toprow.submit.click() is called, it triggers the execution of a function specified
+            # by the arguments provided in the **txt2img_args. 
+            
 
             res_switch_btn.click(fn=None, _js="function(){switchWidthHeight('txt2img')}", inputs=None, outputs=None, show_progress=False)
 
@@ -534,16 +583,20 @@ def create_ui():
 
             toprow.token_button.click(fn=wrap_queued_call(update_token_counter), inputs=[toprow.prompt, steps], outputs=[toprow.token_counter])
             toprow.negative_token_button.click(fn=wrap_queued_call(update_token_counter), inputs=[toprow.negative_prompt, steps], outputs=[toprow.negative_token_counter])
-
+        #with gr.Tab("Generation", id="txt2img_generation") as txt2img_generation_tab, ResizeHandleRow(equal_height=False)
+        
         extra_networks_ui = ui_extra_networks.create_ui(txt2img_interface, [txt2img_generation_tab], 'txt2img')
         ui_extra_networks.setup_ui(extra_networks_ui, txt2img_gallery)
 
         extra_tabs.__exit__()
-
+    #with gr.Blocks(analytics_enabled=False) as txt2img_interface
+    
     scripts.scripts_current = scripts.scripts_img2img
     scripts.scripts_img2img.initialize_scripts(is_img2img=True)
 
+    #MJ: 2) Define img2img interface
     with gr.Blocks(analytics_enabled=False) as img2img_interface:
+        
         toprow = Toprow(is_img2img=True)
 
         extra_tabs = gr.Tabs(elem_id="img2img_extra_tabs")
@@ -645,7 +698,7 @@ def create_ui():
 
                 scripts.scripts_img2img.prepare_ui()
 
-                for category in ordered_ui_categories():
+                for category in ordered_ui_categories(): #MJ: Set the default values of each ui window according to their categories.
                     if category == "sampler":
                         steps, sampler_name = create_sampler_and_steps_selection(sd_samplers.visible_sampler_names(), "img2img")
 
@@ -762,7 +815,12 @@ def create_ui():
             img2img_gallery, generation_info, html_info, html_log = create_output_panel("img2img", opts.outdir_img2img_samples)
 
             img2img_args = dict(
-                fn=wrap_gradio_gpu_call(modules.img2img.img2img, extra_outputs=[None, '', '']),
+                fn=wrap_gradio_gpu_call(modules.img2img.img2img, extra_outputs=[None, '', '']), 
+                # #MJ': this function returns tuple(res), where res = outputs=[
+                #     img2img_gallery,
+                #     generation_info,
+                #     html_info,
+                #     html_log,]
                 _js="submit_img2img",
                 inputs=[
                     dummy_component,
@@ -827,8 +885,9 @@ def create_ui():
                 outputs=[toprow.prompt, dummy_component],
             )
 
+            #MJ: One of two ways to call the img2img function?? Type in enter key in prompt or click "Genenrate" submit button  
             toprow.prompt.submit(**img2img_args)
-            toprow.submit.click(**img2img_args)
+            toprow.submit.click(**img2img_args) #MJ: self.submit = gr.Button('Generate', elem_id=f"{id_part}_generate", variant='primary')
 
             res_switch_btn.click(fn=None, _js="function(){switchWidthHeight('img2img')}", inputs=None, outputs=None, show_progress=False)
 
@@ -891,7 +950,8 @@ def create_ui():
         ui_extra_networks.setup_ui(extra_networks_ui_img2img, img2img_gallery)
 
         extra_tabs.__exit__()
-
+    #with gr.Blocks(analytics_enabled=False) as img2img_interface
+    
     scripts.scripts_current = None
 
     with gr.Blocks(analytics_enabled=False) as extras_interface:
@@ -919,9 +979,11 @@ def create_ui():
             inputs=[image],
             outputs=[html, generation_info, html2],
         )
-
+    #with gr.Blocks(analytics_enabled=False) as pnginfo_interface
+    
     modelmerger_ui = ui_checkpoint_merger.UiCheckpointMerger()
 
+   #MJ: 3) define train_interface
     with gr.Blocks(analytics_enabled=False) as train_interface:
         with gr.Row(equal_height=False):
             gr.HTML(value="<p style='margin-bottom: 0.7em'>See <b><a href=\"https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/Textual-Inversion\">wiki</a></b> for detailed explanation.</p>")
@@ -1239,12 +1301,14 @@ def create_ui():
             inputs=[],
             outputs=[],
         )
-
+    #with gr.Blocks(analytics_enabled=False) as train_interface
+    
     loadsave = ui_loadsave.UiLoadsave(cmd_opts.ui_config_file)
 
     settings = ui_settings.UiSettings()
     settings.create_ui(loadsave, dummy_component)
 
+    #MJ: 6 interfaces are defined
     interfaces = [
         (txt2img_interface, "txt2img", "txt2img"),
         (img2img_interface, "img2img", "img2img"),
@@ -1254,13 +1318,15 @@ def create_ui():
         (train_interface, "Train", "train"),
     ]
 
+    #MJ: add two additional interfaces
     interfaces += script_callbacks.ui_tabs_callback()
     interfaces += [(settings.interface, "Settings", "settings")]
 
+    #MJ: Add extension interface
     extensions_interface = ui_extensions.create_ui()
     interfaces += [(extensions_interface, "Extensions", "extensions")]
 
-    shared.tab_names = []
+    shared.tab_names = []  #MJ: tab_names = [] was defined in modules.shared
     for _interface, label, _ifid in interfaces:
         shared.tab_names.append(label)
 
@@ -1271,10 +1337,12 @@ def create_ui():
 
         with gr.Tabs(elem_id="tabs") as tabs:
             tab_order = {k: i for i, k in enumerate(opts.ui_tab_order)}
+            
             sorted_interfaces = sorted(interfaces, key=lambda x: tab_order.get(x[1], 9999))
 
             for interface, label, ifid in sorted_interfaces:
-                if label in shared.opts.hidden_tabs:
+                
+                if label in shared.opts.hidden_tabs: #MJ: skip the hidden tabs
                     continue
                 with gr.TabItem(label, id=ifid, elem_id=f"tab_{ifid}"):
                     interface.render()
@@ -1285,7 +1353,8 @@ def create_ui():
             loadsave.add_component(f"webui/Tabs@{tabs.elem_id}", tabs)
 
             loadsave.setup_ui()
-
+        #with gr.Tabs(elem_id="tabs") as tabs
+        
         if os.path.exists(os.path.join(script_path, "notification.mp3")):
             gr.Audio(interactive=False, value=os.path.join(script_path, "notification.mp3"), elem_id="audio_notification", visible=False)
 
@@ -1300,12 +1369,13 @@ def create_ui():
         demo.load(fn=update_image_cfg_scale_visibility, inputs=[], outputs=[image_cfg_scale])
 
         modelmerger_ui.setup_ui(dummy_component=dummy_component, sd_model_checkpoint_component=settings.component_dict['sd_model_checkpoint'])
-
+    #with gr.Blocks(theme=shared.gradio_theme, analytics_enabled=False, title="Stable Diffusion") as demo
+    
     loadsave.dump_defaults()
     demo.ui_loadsave = loadsave
 
-    return demo
-
+    return demo  #MJ: used in demo.launch() after create_ui() is executed
+#ENDdef create_ui()
 
 def versions_html():
     import torch
@@ -1336,7 +1406,7 @@ checkpoint: <a id="sd_checkpoint_hash">N/A</a>
 """
 
 
-def setup_ui_api(app):
+def setup_ui_api(app): #MJ: app is a FastAPI app object
     from pydantic import BaseModel, Field
     from typing import List
 

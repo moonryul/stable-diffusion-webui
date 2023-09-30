@@ -137,14 +137,17 @@ class KDiffusionSampler(sd_samplers_common.Sampler):
             sigmas = torch.cat([sigmas[:-2], sigmas[-1:]])
 
         return sigmas
-
-    def sample_img2img(self, p, x, noise, conditioning, unconditional_conditioning, steps=None, image_conditioning=None):
+    
+    #MJ: KDiffusionSampler class
+    #MJ: self.sampler.sample_img2img(self, self.init_latent,x,..): p= self, x = self.init_latent=x0, noise=x=random image
+        samples = self.sampler.sample_img2img(self, self.init_latent, x, conditioning, unconditional_conditioning,image_conditioning=self.image_conditioning)
+    def sample_img2img(self, p, x, noise, conditioning, unconditional_conditioning, steps=None, image_conditioning=None): #MJ: image_conditioning: dummy cond = (1,5,1,1)
         steps, t_enc = sd_samplers_common.setup_img2img_steps(p, steps)
 
         sigmas = self.get_sigmas(p, steps)
-        sigma_sched = sigmas[steps - t_enc - 1:]
+        sigma_sched = sigmas[steps - t_enc - 1:]  #MJ: steps - t_enc - 1 = 20-15-1 = 4; 4:21 = skip over the first three noise levels
 
-        xi = x + noise * sigma_sched[0]
+        xi = x + noise * sigma_sched[0] #MJ: xi = x_{init} = mean + z * simga;  extra_params_kwargs['sigma_max'] = sigma_sched[0]
 
         if opts.img2img_extra_noise > 0:
             p.extra_generation_params["Extra noise"] = opts.img2img_extra_noise
@@ -165,7 +168,7 @@ class KDiffusionSampler(sd_samplers_common.Sampler):
             extra_params_kwargs['n'] = len(sigma_sched) - 1
         if 'sigma_sched' in parameters:
             extra_params_kwargs['sigma_sched'] = sigma_sched
-        if 'sigmas' in parameters:
+        if 'sigmas' in parameters: #MJ: This is the case
             extra_params_kwargs['sigmas'] = sigma_sched
 
         if self.config.options.get('brownian_noise', False):
@@ -185,7 +188,7 @@ class KDiffusionSampler(sd_samplers_common.Sampler):
             's_min_uncond': self.s_min_uncond
         }
 
-        samples = self.launch_sampling(t_enc + 1, lambda: self.func(self.model_wrap_cfg, xi, extra_args=self.sampler_extra_args, disable=False, callback=self.callback_state, **extra_params_kwargs))
+        samples = self.launch_sampling(t_enc + 1, lambda: self.func( self.model_wrap_cfg, xi, extra_args=self.sampler_extra_args, disable=False, callback=self.callback_state, **extra_params_kwargs))
 
         if self.model_wrap_cfg.padded_cond_uncond:
             p.extra_generation_params["Pad conds"] = True

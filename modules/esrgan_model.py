@@ -142,7 +142,7 @@ class UpscalerESRGAN(Upscaler):
 
     def do_upscale(self, img, selected_model):
         try:
-            model = self.load_model(selected_model)
+            model = self.load_model(selected_model) #MJ: selected_model = '/home/moon/stable-diffusion-webui/models/ESRGAN/ESRGAN_4x.pth'
         except Exception as e:
             print(f"Unable to load ESRGAN model {selected_model}: {e}", file=sys.stderr)
             return img
@@ -227,3 +227,4 @@ def esrgan_upscale(model, img):
     newgrid = images.Grid(newtiles, grid.tile_w * scale_factor, grid.tile_h * scale_factor, grid.image_w * scale_factor, grid.image_h * scale_factor, grid.overlap * scale_factor)
     output = images.combine_grid(newgrid)
     return output
+#MJ: class UpscalerESRGAN(Upscaler)

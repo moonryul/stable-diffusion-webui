@@ -20,6 +20,7 @@ class UpscalerRealESRGAN(Upscaler):
             from realesrgan.archs.srvgg_arch import SRVGGNetCompact  # noqa: F401
             self.enable = True
             self.scalers = []
+            
             scalers = self.load_models(path)
 
             local_model_paths = self.find_models(ext_filter=[".pth"])
@@ -37,7 +38,7 @@ class UpscalerRealESRGAN(Upscaler):
             errors.report("Error importing Real-ESRGAN", exc_info=True)
             self.enable = False
             self.scalers = []
-
+    #MJ: Upscaler.upscale() calls do_upscale() three times !
     def do_upscale(self, img, path):
         if not self.enable:
             return img

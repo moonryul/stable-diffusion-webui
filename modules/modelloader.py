@@ -57,7 +57,7 @@ def load_models(model_path: str, model_url: str = None, command_path: str = None
             elif os.path.exists(command_path):
                 places.append(command_path)
 
-        places.append(model_path)
+        places.append(model_path)  #MJ: /models/StableDiffusion
 
         for place in places:
             for full_path in shared.walk_files(place, allowed_extensions=ext_filter):
@@ -78,7 +78,7 @@ def load_models(model_path: str, model_url: str = None, command_path: str = None
     except Exception:
         pass
 
-    return output
+    return output #MJ models/StableDiffusion/v1-5-prunned-ema..
 
 
 def friendly_name(file: str):
@@ -141,13 +141,19 @@ def move_files(src_path: str, dest_path: str, ext_filter: str = None):
 def load_upscalers():
     # We can only do this 'magic' method to dynamically load upscalers if they are referenced,
     # so we'll try to import any _model.py files before looking in __subclasses__
+   
+   #MJ: "Magic" method here refers to the dynamic loading of upscalers — essentially,
+   # using Python's introspection abilities to automatically find and load specific Python modules and classes at runtime.
+    
     modules_dir = os.path.join(shared.script_path, "modules")
     for file in os.listdir(modules_dir):
-        if "_model.py" in file:
+        if "_model.py" in file:  #MJ: realesrgan_model.py, gfpgan_model.py, esrgan_model.py, codeformer_model.py, deepbooru_model.py
             model_name = file.replace("_model.py", "")
             full_model = f"modules.{model_name}_model"
             try:
                 importlib.import_module(full_model)
+                #MJ:  This ensures that all the classes defined in those files are loaded 
+                #  and "known" to Python before they start the next part of the process.
             except Exception:
                 pass
 

@@ -149,6 +149,7 @@ def api_middleware(app: FastAPI):
     async def log_and_time(req: Request, call_next):
         ts = time.time()
         res: Response = await call_next(req)
+        
         duration = str(round(time.time() - ts, 4))
         res.headers["X-Process-Time"] = duration
         endpoint = req.scope.get('path', 'err')
@@ -197,7 +198,7 @@ def api_middleware(app: FastAPI):
         return handle_exception(request, e)
 
 
-class Api:
+class Api: #MJ: custom API class which uses the predefined API class FastAPI
     def __init__(self, app: FastAPI, queue_lock: Lock):
         if shared.cmd_opts.api_auth:
             self.credentials = {}
@@ -208,7 +209,16 @@ class Api:
         self.router = APIRouter()
         self.app = app
         self.queue_lock = queue_lock
+        
+        # MJ: Shared Resources: The queue_lock attribute seems to represent some sort of shared resource
+        # that is needed by the routes defined in this API. By passing this resource to the Api class's __init__ method,
+        # the developer ensures that all the routes defined in this API have access to this shared resource.
+        # This could potentially help avoid issues with resource contention and 
+        # ensure that different parts of the app don't interfere with each other's handling of this resource.
+        
         api_middleware(self.app)
+        
+        #MJ: The following function uses sef.app where app = FastAPI()
         self.add_api_route("/sdapi/v1/txt2img", self.text2imgapi, methods=["POST"], response_model=models.TextToImageResponse)
         self.add_api_route("/sdapi/v1/img2img", self.img2imgapi, methods=["POST"], response_model=models.ImageToImageResponse)
         self.add_api_route("/sdapi/v1/extra-single-image", self.extras_single_image_api, methods=["POST"], response_model=models.ExtrasSingleImageResponse)
@@ -335,14 +345,19 @@ class Api:
                     for idx in range(0, min((alwayson_script.args_to - alwayson_script.args_from), len(request.alwayson_scripts[alwayson_script_name]["args"]))):
                         script_args[alwayson_script.args_from + idx] = request.alwayson_scripts[alwayson_script_name]["args"][idx]
         return script_args
-
+    
+    ##MJ: mentioned in  self.add_api_route("/sdapi/v1/txt2img", self.text2imgapi, methods=["POST"], response_model=models.TextToImageResponse)
     def text2imgapi(self, txt2imgreq: models.StableDiffusionTxt2ImgProcessingAPI):
+        
         script_runner = scripts.scripts_txt2img
+        
         if not script_runner.scripts:
             script_runner.initialize_scripts(False)
             ui.create_ui()
+            
         if not self.default_script_arg_txt2img:
             self.default_script_arg_txt2img = self.init_default_script_args(script_runner)
+            
         selectable_scripts, selectable_script_idx = self.get_selectable_script(txt2imgreq.script_name, script_runner)
 
         populate = txt2imgreq.copy(update={  # Override __init__ params
@@ -363,8 +378,19 @@ class Api:
         send_images = args.pop('send_images', True)
         args.pop('save_images', None)
 
-        with self.queue_lock:
-            with closing(StableDiffusionProcessingTxt2Img(sd_model=shared.sd_model, **args)) as p:
+        with self.queue_lock: #MJ: with X:  it's designed to ensure that resources are efficiently and safely used and then released, even if there are exceptions within the block of code.
+        #MJ: with self.queue_lock: This acquires some kind of lock or synchronization primitive to ensure thread or process safety. Once the block of code completes (or if there's an exception within), the lock will be released.
+            
+            with closing( StableDiffusionProcessingTxt2Img(sd_model=shared.sd_model, **args) ) as p:
+                #MJ: The closing function typically calls the close() method on the given object when exiting the with block.
+                # This pattern is useful when working with objects that don't natively support the context manager protocol
+                # but have a close() method.
+                #MJ: The closing() utility is provided by the contextlib module in Python's standard library.
+                # It's designed to **convert objects** that aren't context managers
+                # (i.e., don't implement both __enter__ and __exit__ methods) but have a close() method, **into context managers**. 
+                # This allows them to be used with the with statement to ensure they are closed properly,
+                # irrespective of whether an exception is thrown within the with block.
+                
                 p.is_api = True
                 p.scripts = script_runner
                 p.outpath_grids = opts.outdir_txt2img_grids
@@ -375,6 +401,7 @@ class Api:
                     if selectable_scripts is not None:
                         p.script_args = script_args
                         processed = scripts.scripts_txt2img.run(p, *p.script_args) # Need to pass args as list here
+                        #MJ: scripts.scripts_txt2img is a ScriptRunner
                     else:
                         p.script_args = tuple(script_args) # Need to pass args as tuple here
                         processed = process_images(p)
@@ -385,6 +412,7 @@ class Api:
         b64images = list(map(encode_pil_to_base64, processed.images)) if send_images else []
 
         return models.TextToImageResponse(images=b64images, parameters=vars(txt2imgreq), info=processed.js())
+    # def text2imgapi(self, txt2imgreq: models.StableDiffusionTxt2ImgProcessingAPI)
 
     def img2imgapi(self, img2imgreq: models.StableDiffusionImg2ImgProcessingAPI):
         init_images = img2imgreq.init_images
@@ -399,6 +427,7 @@ class Api:
         if not script_runner.scripts:
             script_runner.initialize_scripts(True)
             ui.create_ui()
+            
         if not self.default_script_arg_img2img:
             self.default_script_arg_img2img = self.init_default_script_args(script_runner)
         selectable_scripts, selectable_script_idx = self.get_selectable_script(img2imgreq.script_name, script_runner)
